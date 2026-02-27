@@ -1,6 +1,8 @@
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+use gc_parser::TerminalParser;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 
@@ -40,6 +42,10 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
     // Enter raw mode with a drop guard so it's ALWAYS restored
     let _raw_guard = RawModeGuard::enable()?;
 
+    // Initialize terminal parser with current screen dimensions
+    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+    let parser = Arc::new(Mutex::new(TerminalParser::new(rows, cols)));
+
     // Channel to signal that one of the I/O tasks has finished
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
@@ -68,6 +74,7 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
 
     // Task B: PTY → stdout (shell output to terminal)
     let pty_shutdown = shutdown_tx.clone();
+    let parser_for_stdout = Arc::clone(&parser);
     let stdout_handle = tokio::task::spawn_blocking(move || {
         let mut stdout = std::io::stdout().lock();
         let mut buf = [0u8; 8192];
@@ -78,6 +85,13 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             };
+
+            // Feed bytes through the VT parser to track terminal state
+            {
+                let mut p = parser_for_stdout.lock().unwrap();
+                p.process_bytes(&buf[..n]);
+            }
+
             if stdout.write_all(&buf[..n]).is_err() {
                 break;
             }
@@ -108,6 +122,9 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
                         if let Err(e) = resize_pty(master.as_ref(), size) {
                             tracing::warn!("failed to resize PTY: {}", e);
                         }
+                        // Update parser's screen dimensions
+                        let mut p = parser.lock().unwrap();
+                        p.state_mut().update_dimensions(size.rows, size.cols);
                     }
                     Err(e) => {
                         tracing::warn!("failed to get terminal size for resize: {}", e);

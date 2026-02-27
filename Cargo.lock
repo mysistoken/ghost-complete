@@ -270,7 +270,6 @@ name = "gc-buffer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gc-parser",
 ]
 
 [[package]]
@@ -297,6 +296,7 @@ name = "gc-parser"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tracing",
  "vte",
 ]
 
@@ -306,6 +306,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "gc-parser",
  "nix 0.29.0",
  "portable-pty",
  "tokio",

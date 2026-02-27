@@ -10,3 +10,4 @@ crossterm = { workspace = true }
 nix = { version = "0.29", features = ["signal"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+gc-parser = { path = "../gc-parser" }

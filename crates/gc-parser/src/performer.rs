@@ -1,0 +1,505 @@
+use std::path::PathBuf;
+
+use vte::Perform;
+
+use crate::state::TerminalState;
+
+/// Helper: extract the first value from a CSI param subslice, or return the given default.
+fn csi_param(params: &vte::Params, index: usize, default: u16) -> u16 {
+    params
+        .iter()
+        .nth(index)
+        .and_then(|sub| sub.first().copied())
+        .map(|v| if v == 0 { default } else { v })
+        .unwrap_or(default)
+}
+
+impl Perform for TerminalState {
+    fn print(&mut self, _c: char) {
+        self.advance_col(1);
+    }
+
+    fn execute(&mut self, byte: u8) {
+        match byte {
+            0x0A => self.line_feed(),
+            0x0D => self.carriage_return(),
+            0x08 => self.backspace(),
+            0x09 => self.tab(),
+            _ => {}
+        }
+    }
+
+    fn csi_dispatch(
+        &mut self,
+        params: &vte::Params,
+        intermediates: &[u8],
+        _ignore: bool,
+        action: char,
+    ) {
+        // Ignore sequences with intermediates we don't handle (e.g. CSI ? sequences for DECSET)
+        if !intermediates.is_empty() {
+            return;
+        }
+
+        match action {
+            // CUP — cursor position
+            'H' | 'f' => {
+                let row = csi_param(params, 0, 1).saturating_sub(1);
+                let col = csi_param(params, 1, 1).saturating_sub(1);
+                self.set_cursor(row, col);
+            }
+            // CUU — cursor up
+            'A' => self.move_up(csi_param(params, 0, 1)),
+            // CUD — cursor down
+            'B' => self.move_down(csi_param(params, 0, 1)),
+            // CUF — cursor forward
+            'C' => self.move_forward(csi_param(params, 0, 1)),
+            // CUB — cursor back
+            'D' => self.move_back(csi_param(params, 0, 1)),
+            // CNL — cursor next line
+            'E' => {
+                self.move_down(csi_param(params, 0, 1));
+                self.carriage_return();
+            }
+            // CPL — cursor previous line
+            'F' => {
+                self.move_up(csi_param(params, 0, 1));
+                self.carriage_return();
+            }
+            // CHA — cursor horizontal absolute
+            'G' => {
+                let col = csi_param(params, 0, 1).saturating_sub(1);
+                self.set_col(col);
+            }
+            // VPA — vertical position absolute
+            'd' => {
+                let row = csi_param(params, 0, 1).saturating_sub(1);
+                self.set_row(row);
+            }
+            // ED — erase in display
+            'J' => {
+                let mode = csi_param(params, 0, 0);
+                if mode == 2 || mode == 3 {
+                    self.set_cursor(0, 0);
+                }
+            }
+            // SU — scroll up
+            'S' => self.move_up(csi_param(params, 0, 1)),
+            // SD — scroll down
+            'T' => self.move_down(csi_param(params, 0, 1)),
+            _ => {}
+        }
+    }
+
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        // DECSC/DECRC can come as ESC 7 / ESC 8 (no intermediates)
+        // or as CSI ? s / CSI ? u (which we don't handle here)
+        if intermediates.is_empty() {
+            match byte {
+                b'7' => self.save_cursor(),
+                b'8' => self.restore_cursor(),
+                b'M' => self.reverse_index(),
+                _ => {}
+            }
+        }
+    }
+
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if params.is_empty() {
+            return;
+        }
+
+        match params[0] {
+            // OSC 133 — semantic prompts (FinalTerm protocol)
+            b"133" => {
+                if params.len() < 2 {
+                    return;
+                }
+                match params[1] {
+                    b"A" => {
+                        // Prompt about to be displayed
+                        self.set_prompt_row(self.cursor_row());
+                        self.set_in_prompt(true);
+                        tracing::debug!(row = self.cursor_row(), "OSC 133;A — prompt start");
+                    }
+                    b"B" => {
+                        // Prompt ended, command input starts
+                        // (Some shells emit B; we treat it like A's complement)
+                    }
+                    b"C" => {
+                        // Command execution started
+                        self.set_in_prompt(false);
+                        self.clear_command_buffer();
+                        tracing::debug!("OSC 133;C — command executing");
+                    }
+                    _ if params[1].starts_with(b"D") => {
+                        // Command finished (optional exit status follows)
+                        // Future use — we don't need this yet
+                    }
+                    _ => {}
+                }
+            }
+            // OSC 7770 — Ghost Complete buffer report
+            b"7770" => {
+                if params.len() < 3 {
+                    return;
+                }
+                let cursor = std::str::from_utf8(params[1])
+                    .ok()
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let buffer = String::from_utf8_lossy(params[2]).into_owned();
+                tracing::debug!(cursor, "OSC 7770 — buffer update");
+                self.set_command_buffer(buffer, cursor);
+            }
+            // OSC 7 — current working directory
+            b"7" => {
+                if params.len() < 2 {
+                    return;
+                }
+                if let Some(path) = parse_osc7_path(params[1]) {
+                    tracing::debug!(?path, "OSC 7 — cwd update");
+                    self.set_cwd(path);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Parse a `file://{host}/{path}` URI from OSC 7 into a `PathBuf`.
+fn parse_osc7_path(uri: &[u8]) -> Option<PathBuf> {
+    let s = std::str::from_utf8(uri).ok()?;
+    let path_part = s.strip_prefix("file://")?;
+    // Skip the hostname — find the first '/' after the authority
+    let slash_idx = path_part.find('/')?;
+    let path = &path_part[slash_idx..];
+    // Percent-decode the path (basic: just handle %20 for spaces)
+    let decoded = percent_decode(path);
+    Some(PathBuf::from(decoded))
+}
+
+/// Minimal percent-decoding for file paths.
+fn percent_decode(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let hi = chars.next();
+            let lo = chars.next();
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                if let (Some(h), Some(l)) = (hex_val(hi), hex_val(lo)) {
+                    result.push((h << 4 | l) as char);
+                    continue;
+                }
+            }
+            // Malformed — keep literal
+            result.push('%');
+        } else {
+            result.push(b as char);
+        }
+    }
+    result
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TerminalParser;
+
+    fn make_parser() -> TerminalParser {
+        TerminalParser::new(24, 80)
+    }
+
+    // -- Basic cursor tracking --
+
+    #[test]
+    fn test_print_advances_cursor() {
+        let mut p = make_parser();
+        p.process_bytes(b"abc");
+        assert_eq!(p.state().cursor_position(), (0, 3));
+    }
+
+    #[test]
+    fn test_line_wrap() {
+        let mut p = TerminalParser::new(24, 5);
+        p.process_bytes(b"abcde");
+        // After 5 chars in a 5-col terminal, should wrap to next line
+        assert_eq!(p.state().cursor_position(), (1, 0));
+    }
+
+    #[test]
+    fn test_cr_resets_col() {
+        let mut p = make_parser();
+        p.process_bytes(b"hello\r");
+        assert_eq!(p.state().cursor_position(), (0, 0));
+    }
+
+    #[test]
+    fn test_lf_advances_row() {
+        let mut p = make_parser();
+        p.process_bytes(b"hello\n");
+        assert_eq!(p.state().cursor_position(), (1, 5));
+    }
+
+    #[test]
+    fn test_backspace() {
+        let mut p = make_parser();
+        p.process_bytes(b"abc\x08");
+        assert_eq!(p.state().cursor_position(), (0, 2));
+    }
+
+    #[test]
+    fn test_backspace_saturates() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x08\x08\x08");
+        assert_eq!(p.state().cursor_position(), (0, 0));
+    }
+
+    #[test]
+    fn test_tab_stop() {
+        let mut p = make_parser();
+        p.process_bytes(b"ab\t");
+        // col 2, next tab stop at 8
+        assert_eq!(p.state().cursor_position(), (0, 8));
+    }
+
+    #[test]
+    fn test_tab_from_zero() {
+        let mut p = make_parser();
+        p.process_bytes(b"\t");
+        assert_eq!(p.state().cursor_position(), (0, 8));
+    }
+
+    // -- CSI cursor movement --
+
+    #[test]
+    fn test_csi_cup() {
+        let mut p = make_parser();
+        // ESC[5;10H — cursor to row 5, col 10 (1-indexed)
+        p.process_bytes(b"\x1b[5;10H");
+        assert_eq!(p.state().cursor_position(), (4, 9));
+    }
+
+    #[test]
+    fn test_csi_cup_defaults() {
+        let mut p = make_parser();
+        p.process_bytes(b"hello"); // move cursor
+        p.process_bytes(b"\x1b[H"); // CUP with no params → (1,1) → (0,0)
+        assert_eq!(p.state().cursor_position(), (0, 0));
+    }
+
+    #[test]
+    fn test_csi_cursor_up() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[10;1H"); // go to row 10
+        p.process_bytes(b"\x1b[3A"); // up 3
+        assert_eq!(p.state().cursor_position(), (6, 0));
+    }
+
+    #[test]
+    fn test_csi_cursor_down() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[2B"); // down 2
+        assert_eq!(p.state().cursor_position(), (2, 0));
+    }
+
+    #[test]
+    fn test_csi_cursor_forward() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[5C"); // forward 5
+        assert_eq!(p.state().cursor_position(), (0, 5));
+    }
+
+    #[test]
+    fn test_csi_cursor_back() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[20G"); // col 20 (1-indexed)
+        p.process_bytes(b"\x1b[3D"); // back 3
+        assert_eq!(p.state().cursor_position(), (0, 16));
+    }
+
+    #[test]
+    fn test_csi_cha() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[15G"); // CHA to col 15 (1-indexed)
+        assert_eq!(p.state().cursor_position(), (0, 14));
+    }
+
+    #[test]
+    fn test_csi_vpa() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[10d"); // VPA to row 10 (1-indexed)
+        assert_eq!(p.state().cursor_position(), (9, 0));
+    }
+
+    #[test]
+    fn test_csi_cnl() {
+        let mut p = make_parser();
+        p.process_bytes(b"hello"); // col 5
+        p.process_bytes(b"\x1b[2E"); // CNL: down 2, col 0
+        assert_eq!(p.state().cursor_position(), (2, 0));
+    }
+
+    #[test]
+    fn test_csi_cpl() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[10;15H"); // row 10, col 15
+        p.process_bytes(b"\x1b[3F"); // CPL: up 3, col 0
+        assert_eq!(p.state().cursor_position(), (6, 0));
+    }
+
+    #[test]
+    fn test_csi_ed_clear_screen() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[10;15H"); // move cursor
+        p.process_bytes(b"\x1b[2J"); // ED mode 2: clear screen
+        assert_eq!(p.state().cursor_position(), (0, 0));
+    }
+
+    // -- Cursor save/restore --
+
+    #[test]
+    fn test_decsc_decrc() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[5;10H"); // move to (4, 9)
+        p.process_bytes(b"\x1b7"); // DECSC: save
+        p.process_bytes(b"\x1b[1;1H"); // move to (0, 0)
+        assert_eq!(p.state().cursor_position(), (0, 0));
+        p.process_bytes(b"\x1b8"); // DECRC: restore
+        assert_eq!(p.state().cursor_position(), (4, 9));
+    }
+
+    #[test]
+    fn test_reverse_index() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[5;1H"); // row 5
+        p.process_bytes(b"\x1bM"); // RI: up 1
+        assert_eq!(p.state().cursor_position(), (3, 0));
+    }
+
+    // -- OSC sequences --
+
+    #[test]
+    fn test_osc133_prompt_a() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[3;1H"); // row 3
+        p.process_bytes(b"\x1b]133;A\x07"); // OSC 133;A (BEL terminated)
+        assert_eq!(p.state().prompt_row(), Some(2));
+        assert!(p.state().in_prompt());
+    }
+
+    #[test]
+    fn test_osc133_prompt_c() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]133;A\x07"); // start prompt
+        assert!(p.state().in_prompt());
+        p.process_bytes(b"\x1b]133;C\x07"); // command executing
+        assert!(!p.state().in_prompt());
+    }
+
+    // -- OSC 7770 buffer reporting --
+
+    #[test]
+    fn test_osc7770_buffer() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7770;5;hello\x07");
+        assert_eq!(p.state().command_buffer(), Some("hello"));
+        assert_eq!(p.state().buffer_cursor(), 5);
+    }
+
+    #[test]
+    fn test_osc7770_empty() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7770;0;\x07");
+        assert_eq!(p.state().command_buffer(), Some(""));
+        assert_eq!(p.state().buffer_cursor(), 0);
+    }
+
+    #[test]
+    fn test_osc7770_with_spaces() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7770;4;echo hello world\x07");
+        assert_eq!(p.state().command_buffer(), Some("echo hello world"));
+        assert_eq!(p.state().buffer_cursor(), 4);
+    }
+
+    #[test]
+    fn test_buffer_cleared_on_command_exec() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7770;3;git\x07");
+        assert_eq!(p.state().command_buffer(), Some("git"));
+        p.process_bytes(b"\x1b]133;C\x07");
+        assert_eq!(p.state().command_buffer(), None);
+        assert_eq!(p.state().buffer_cursor(), 0);
+    }
+
+    // -- OSC 7 CWD --
+
+    #[test]
+    fn test_osc7_cwd() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7;file://localhost/Users/test\x07");
+        assert_eq!(p.state().cwd(), Some(&PathBuf::from("/Users/test")));
+    }
+
+    #[test]
+    fn test_osc7_cwd_with_spaces() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7;file://localhost/Users/test%20dir/sub\x07");
+        assert_eq!(p.state().cwd(), Some(&PathBuf::from("/Users/test dir/sub")));
+    }
+
+    // -- Screen resize --
+
+    #[test]
+    fn test_update_dimensions() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b[24;80H"); // bottom-right corner (0-indexed: 23, 79)
+        assert_eq!(p.state().cursor_position(), (23, 79));
+
+        // Shrink screen — cursor should be clamped
+        p.state_mut().update_dimensions(10, 40);
+        assert_eq!(p.state().cursor_position(), (9, 39));
+        assert_eq!(p.state().screen_dimensions(), (10, 40));
+    }
+
+    // -- Helper unit tests --
+
+    #[test]
+    fn test_parse_osc7_path() {
+        assert_eq!(
+            parse_osc7_path(b"file://hostname/some/path"),
+            Some(PathBuf::from("/some/path"))
+        );
+    }
+
+    #[test]
+    fn test_parse_osc7_path_percent_encoding() {
+        assert_eq!(
+            parse_osc7_path(b"file://host/path%20with%20spaces"),
+            Some(PathBuf::from("/path with spaces"))
+        );
+    }
+
+    #[test]
+    fn test_parse_osc7_path_invalid() {
+        assert_eq!(parse_osc7_path(b"not-a-file-uri"), None);
+    }
+
+    #[test]
+    fn test_percent_decode() {
+        assert_eq!(percent_decode("/hello%20world"), "/hello world");
+        assert_eq!(percent_decode("/no/encoding"), "/no/encoding");
+        assert_eq!(percent_decode("%2F"), "/");
+    }
+}
