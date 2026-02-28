@@ -377,6 +377,7 @@ dependencies = [
  "clap",
  "gc-config",
  "gc-pty",
+ "portable-pty",
  "tokio",
  "tracing",
  "tracing-subscriber",

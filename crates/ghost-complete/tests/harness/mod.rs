@@ -39,8 +39,14 @@ impl GhostProcess {
 
         let pid = child.process_id();
 
-        let writer = pty_pair.master.take_writer().expect("failed to take PTY writer");
-        let mut reader = pty_pair.master.try_clone_reader().expect("failed to clone PTY reader");
+        let writer = pty_pair
+            .master
+            .take_writer()
+            .expect("failed to take PTY writer");
+        let mut reader = pty_pair
+            .master
+            .try_clone_reader()
+            .expect("failed to clone PTY reader");
 
         // Shared output buffer with condvar for blocking reads.
         let output = Arc::new((Mutex::new(Vec::new()), Condvar::new()));
@@ -77,14 +83,18 @@ impl GhostProcess {
     /// Send a line to the PTY (appends \r for "Enter").
     pub fn send_line(&mut self, line: &str) {
         let data = format!("{}\r", line);
-        self.writer.write_all(data.as_bytes()).expect("failed to write to PTY");
+        self.writer
+            .write_all(data.as_bytes())
+            .expect("failed to write to PTY");
         self.writer.flush().expect("failed to flush PTY writer");
     }
 
     /// Write raw bytes to the PTY.
     #[allow(dead_code)]
     pub fn write_raw(&mut self, data: &[u8]) {
-        self.writer.write_all(data).expect("failed to write raw to PTY");
+        self.writer
+            .write_all(data)
+            .expect("failed to write raw to PTY");
         self.writer.flush().expect("failed to flush PTY writer");
     }
 
@@ -144,10 +154,7 @@ impl GhostProcess {
 
         loop {
             if let Some(status) = self.child.try_wait().expect("try_wait failed") {
-                return status
-                    .exit_code()
-                    .try_into()
-                    .unwrap_or(1);
+                return status.exit_code().try_into().unwrap_or(1);
             }
             if start.elapsed() >= timeout {
                 self.child.kill().ok();
