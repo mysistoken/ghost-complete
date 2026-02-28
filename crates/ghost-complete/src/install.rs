@@ -57,6 +57,49 @@ fn remove_block(content: &str, begin: &str, end: &str) -> (String, bool) {
     (result, true)
 }
 
+/// Find the bundled specs/ directory: next to the binary, or in the source tree.
+fn find_bundled_specs() -> Option<std::path::PathBuf> {
+    // Next to the running binary (cargo install layout won't have this, but cargo run will)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let specs = exe_dir.join("specs");
+            if specs.is_dir() {
+                return Some(specs);
+            }
+        }
+    }
+    // Source tree (development: running from repo root)
+    let cwd_specs = std::path::PathBuf::from("specs");
+    if cwd_specs.is_dir() {
+        return Some(cwd_specs);
+    }
+    None
+}
+
+fn copy_specs(config_dir: &Path) -> Result<()> {
+    let Some(source) = find_bundled_specs() else {
+        println!("  No bundled specs found, skipping spec installation");
+        return Ok(());
+    };
+
+    let dest = config_dir.join("specs");
+    fs::create_dir_all(&dest)
+        .with_context(|| format!("failed to create {}", dest.display()))?;
+
+    let mut count = 0;
+    for entry in fs::read_dir(&source)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("json") {
+            let dest_file = dest.join(entry.file_name());
+            fs::copy(&path, &dest_file)?;
+            count += 1;
+        }
+    }
+    println!("  Installed {count} completion specs to {}", dest.display());
+    Ok(())
+}
+
 fn install_to(zshrc_path: &Path, config_dir: &Path) -> Result<()> {
     // 1. Write shell integration script
     let shell_dir = config_dir.join("shell");
@@ -67,6 +110,9 @@ fn install_to(zshrc_path: &Path, config_dir: &Path) -> Result<()> {
     fs::write(&script_path, ZSH_INTEGRATION)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
     println!("  Wrote shell integration to {}", script_path.display());
+
+    // 1b. Copy completion specs
+    copy_specs(config_dir)?;
 
     // 2. Read existing .zshrc (or empty)
     let existing = if zshrc_path.exists() {

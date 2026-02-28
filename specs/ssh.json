@@ -1,0 +1,182 @@
+{
+  "name": "ssh",
+  "description": "OpenSSH remote login client",
+  "options": [
+    {
+      "name": ["-p"],
+      "description": "Port to connect to on the remote host",
+      "args": { "name": "port" }
+    },
+    {
+      "name": ["-i"],
+      "description": "Identity file (private key) for public key authentication",
+      "args": { "name": "identity_file", "template": "filepaths" }
+    },
+    {
+      "name": ["-l"],
+      "description": "Login name on the remote machine",
+      "args": { "name": "login_name" }
+    },
+    {
+      "name": ["-o"],
+      "description": "Set an option in ssh_config format (e.g. StrictHostKeyChecking=no)",
+      "args": { "name": "option" }
+    },
+    {
+      "name": ["-L"],
+      "description": "Local port forwarding: [bind_address:]port:host:hostport",
+      "args": { "name": "local_forward" }
+    },
+    {
+      "name": ["-R"],
+      "description": "Remote port forwarding: [bind_address:]port:host:hostport",
+      "args": { "name": "remote_forward" }
+    },
+    {
+      "name": ["-D"],
+      "description": "Dynamic (SOCKS) port forwarding on the given local port",
+      "args": { "name": "bind_address_port" }
+    },
+    {
+      "name": ["-W"],
+      "description": "Forward stdin/stdout to host:port over the secure channel (tunnel mode)",
+      "args": { "name": "host_port" }
+    },
+    {
+      "name": ["-J"],
+      "description": "Connect via a jump host (ProxyJump): [user@]host[:port]",
+      "args": { "name": "jump_host" }
+    },
+    {
+      "name": ["-F"],
+      "description": "Use an alternative per-user configuration file",
+      "args": { "name": "config_file", "template": "filepaths" }
+    },
+    {
+      "name": ["-b"],
+      "description": "Bind to this address on the local machine for the connection",
+      "args": { "name": "bind_address" }
+    },
+    {
+      "name": ["-c"],
+      "description": "Select the cipher specification for encrypting the session",
+      "args": { "name": "cipher_spec" }
+    },
+    {
+      "name": ["-m"],
+      "description": "Specify MAC (message authentication code) algorithms",
+      "args": { "name": "mac_spec" }
+    },
+    {
+      "name": ["-N"],
+      "description": "Do not execute a remote command (useful for port forwarding only)"
+    },
+    {
+      "name": ["-f"],
+      "description": "Go to background just before command execution"
+    },
+    {
+      "name": ["-v"],
+      "description": "Verbose mode — print debugging messages"
+    },
+    {
+      "name": ["-vv"],
+      "description": "More verbose — increased debug output (level 2)"
+    },
+    {
+      "name": ["-vvv"],
+      "description": "Maximum verbosity — full debug output (level 3)"
+    },
+    {
+      "name": ["-X"],
+      "description": "Enable X11 forwarding"
+    },
+    {
+      "name": ["-Y"],
+      "description": "Enable trusted X11 forwarding (bypasses X11 security extension controls)"
+    },
+    {
+      "name": ["-C"],
+      "description": "Request compression of all data"
+    },
+    {
+      "name": ["-A"],
+      "description": "Enable forwarding of the authentication agent connection"
+    },
+    {
+      "name": ["-t"],
+      "description": "Force pseudo-terminal allocation"
+    },
+    {
+      "name": ["-T"],
+      "description": "Disable pseudo-terminal allocation"
+    },
+    {
+      "name": ["-q"],
+      "description": "Quiet mode — suppress most warning and diagnostic messages"
+    },
+    {
+      "name": ["-4"],
+      "description": "Force IPv4 addresses only"
+    },
+    {
+      "name": ["-6"],
+      "description": "Force IPv6 addresses only"
+    },
+    {
+      "name": ["-G"],
+      "description": "Print the configuration that would be used for the given host and exit"
+    },
+    {
+      "name": ["-n"],
+      "description": "Redirect stdin from /dev/null (prevents reading from stdin)"
+    },
+    {
+      "name": ["-a"],
+      "description": "Disable forwarding of the authentication agent connection"
+    },
+    {
+      "name": ["-x"],
+      "description": "Disable X11 forwarding"
+    },
+    {
+      "name": ["-K"],
+      "description": "Enable GSSAPI-based authentication and forwarding"
+    },
+    {
+      "name": ["-k"],
+      "description": "Disable forwarding of GSSAPI credentials"
+    },
+    {
+      "name": ["-M"],
+      "description": "Place the connection into master mode for connection sharing"
+    },
+    {
+      "name": ["-S"],
+      "description": "Specify the location of a control socket for connection sharing",
+      "args": { "name": "ctl_path", "template": "filepaths" }
+    },
+    {
+      "name": ["-e"],
+      "description": "Set the escape character (default: ~); use 'none' to disable",
+      "args": { "name": "escape_char" }
+    },
+    {
+      "name": ["-E"],
+      "description": "Append debug logs to a file instead of stderr",
+      "args": { "name": "log_file", "template": "filepaths" }
+    }
+  ],
+  "args": [
+    {
+      "name": "destination",
+      "description": "Remote host to connect to, in the form [user@]hostname"
+    },
+    {
+      "name": "command",
+      "description": "Command to execute on the remote host (optional)",
+      "isOptional": true,
+      "isVariadic": true
+    }
+  ]
+}

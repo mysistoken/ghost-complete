@@ -1,0 +1,93 @@
+{
+  "name": "python",
+  "description": "Python interpreter",
+  "args": [
+    {
+      "name": "script",
+      "template": "filepaths"
+    }
+  ],
+  "options": [
+    {
+      "name": ["-c"],
+      "description": "Execute the Python code in command",
+      "args": [{ "name": "command" }]
+    },
+    {
+      "name": ["-m"],
+      "description": "Run library module as a script",
+      "args": [{ "name": "module" }]
+    },
+    {
+      "name": ["-i"],
+      "description": "Inspect interactively after running script"
+    },
+    {
+      "name": ["-B"],
+      "description": "Do not write .pyc files on import"
+    },
+    {
+      "name": ["-u"],
+      "description": "Force stdin, stdout and stderr to be unbuffered"
+    },
+    {
+      "name": ["-v"],
+      "description": "Print a message each time a module is initialized"
+    },
+    {
+      "name": ["-V", "--version"],
+      "description": "Print the Python version number and exit"
+    },
+    {
+      "name": ["-h", "--help"],
+      "description": "Print a help message and exit"
+    },
+    {
+      "name": ["-O"],
+      "description": "Remove assert statements and docstrings (optimize)"
+    },
+    {
+      "name": ["-OO"],
+      "description": "Remove assert statements and docstrings (aggressive optimize)"
+    },
+    {
+      "name": ["-q"],
+      "description": "Do not print version and copyright messages on startup"
+    },
+    {
+      "name": ["-s"],
+      "description": "Do not add user site-packages directory to sys.path"
+    },
+    {
+      "name": ["-S"],
+      "description": "Do not imply import site on initialization"
+    },
+    {
+      "name": ["-E"],
+      "description": "Ignore Python environment variables"
+    },
+    {
+      "name": ["-b"],
+      "description": "Issue a warning when comparing bytes with str or int"
+    },
+    {
+      "name": ["-W"],
+      "description": "Warning control (default, error, ignore, always, module, once)",
+      "args": [{ "name": "action" }]
+    },
+    {
+      "name": ["-X"],
+      "description": "Set implementation-specific option",
+      "args": [{ "name": "option" }]
+    },
+    {
+      "name": ["--check-hash-based-pycs"],
+      "description": "Control validation of hash-based .pyc files (default, always, or never)",
+      "args": [{ "name": "mode" }]
+    },
+    {
+      "name": ["-P"],
+      "description": "Do not prepend a potentially unsafe path to sys.path"
+    }
+  ]
+}

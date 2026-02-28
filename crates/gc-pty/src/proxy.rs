@@ -272,8 +272,16 @@ fn resolve_spec_dirs(configured: &[String]) -> Vec<PathBuf> {
             .collect();
     }
 
-    // Auto-detect: check next to binary, then cwd
+    // Auto-detect: check config dir, next to binary, then cwd
     let mut dirs = Vec::new();
+
+    // Config directory (installed by `ghost-complete install`)
+    if let Some(config_dir) = dirs::config_dir() {
+        let spec_dir = config_dir.join("ghost-complete/specs");
+        if spec_dir.is_dir() {
+            dirs.push(spec_dir);
+        }
+    }
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
