@@ -375,9 +375,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs",
  "gc-config",
  "gc-pty",
  "portable-pty",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

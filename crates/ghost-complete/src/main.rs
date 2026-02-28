@@ -1,9 +1,15 @@
+mod install;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "ghost-complete", about = "Terminal-native autocomplete engine")]
+#[command(
+    name = "ghost-complete",
+    about = "Terminal-native autocomplete engine",
+    after_help = "COMMANDS:\n  install     Install shell integration into ~/.zshrc\n  uninstall   Remove shell integration from ~/.zshrc"
+)]
 struct Cli {
     /// Path to config file
     #[arg(long)]
@@ -52,6 +58,18 @@ fn init_tracing(level: &str, log_file: Option<&str>) -> Result<()> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    match cli.shell_args.first().map(|s| s.as_str()) {
+        Some("install") => {
+            init_tracing(&cli.log_level, cli.log_file.as_deref())?;
+            return install::run_install();
+        }
+        Some("uninstall") => {
+            init_tracing(&cli.log_level, cli.log_file.as_deref())?;
+            return install::run_uninstall();
+        }
+        _ => {}
+    }
 
     init_tracing(&cli.log_level, cli.log_file.as_deref())?;
 
