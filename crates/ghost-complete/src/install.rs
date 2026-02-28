@@ -23,12 +23,13 @@ fn init_block() -> String {
     )
 }
 
-fn shell_integration_block() -> String {
+fn shell_integration_block(script_path: &Path) -> String {
     format!(
         "{SHELL_BEGIN}\n\
          {MANAGED_WARNING}\n\
-         source \"$HOME/.config/ghost-complete/shell/ghost-complete.zsh\"\n\
-         {SHELL_END}"
+         source \"{}\"\n\
+         {SHELL_END}",
+        script_path.display()
     )
 }
 
@@ -96,7 +97,7 @@ fn install_to(zshrc_path: &Path, config_dir: &Path) -> Result<()> {
         new_zshrc.push_str(&content);
         new_zshrc.push('\n');
     }
-    new_zshrc.push_str(&shell_integration_block());
+    new_zshrc.push_str(&shell_integration_block(&script_path));
     new_zshrc.push('\n');
 
     // 6. Write
@@ -207,11 +208,12 @@ mod tests {
 
     #[test]
     fn test_shell_integration_block_content() {
-        let block = shell_integration_block();
+        let path = Path::new("/some/path/ghost-complete.zsh");
+        let block = shell_integration_block(path);
         assert!(block.contains(SHELL_BEGIN));
         assert!(block.contains(SHELL_END));
         assert!(block.contains(MANAGED_WARNING));
-        assert!(block.contains("ghost-complete.zsh"));
+        assert!(block.contains("/some/path/ghost-complete.zsh"));
     }
 
     #[test]
@@ -235,6 +237,14 @@ mod tests {
         assert!(script.exists());
         let script_content = fs::read_to_string(&script).unwrap();
         assert_eq!(script_content, ZSH_INTEGRATION);
+
+        // Source path in .zshrc must match actual script location
+        let expected_source = format!("source \"{}\"", script.display());
+        assert!(
+            content.contains(&expected_source),
+            "source path mismatch: .zshrc does not contain '{}'",
+            expected_source
+        );
     }
 
     #[test]
