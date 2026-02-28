@@ -1,0 +1,97 @@
+{
+  "name": "npm",
+  "description": "Node.js package manager",
+  "subcommands": [
+    {
+      "name": "install",
+      "description": "Install a package",
+      "args": [
+        { "name": "package", "description": "Package to install" }
+      ],
+      "options": [
+        { "name": ["--save-dev", "-D"], "description": "Save as devDependency" },
+        { "name": ["--save-exact", "-E"], "description": "Save exact version" },
+        { "name": ["--global", "-g"], "description": "Install globally" },
+        { "name": ["--legacy-peer-deps"], "description": "Ignore peer dependency conflicts" }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run a script defined in package.json",
+      "args": [
+        { "name": "script", "description": "Script name to run" }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Run the test script",
+      "options": [
+        { "name": ["--"], "description": "Pass arguments to test runner" }
+      ]
+    },
+    {
+      "name": "start",
+      "description": "Run the start script"
+    },
+    {
+      "name": "build",
+      "description": "Run the build script"
+    },
+    {
+      "name": "publish",
+      "description": "Publish a package to the registry",
+      "options": [
+        { "name": ["--access"], "description": "Set access level (public or restricted)" },
+        { "name": ["--tag"], "description": "Register with the given tag" },
+        { "name": ["--dry-run"], "description": "Do everything except actually publishing" }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Create a package.json file",
+      "options": [
+        { "name": ["-y", "--yes"], "description": "Skip the questionnaire" }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Remove a package",
+      "args": [
+        { "name": "package", "description": "Package to remove" }
+      ],
+      "options": [
+        { "name": ["--save-dev", "-D"], "description": "Remove from devDependencies" },
+        { "name": ["--global", "-g"], "description": "Remove global package" }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update packages",
+      "args": [
+        { "name": "package", "description": "Package to update" }
+      ],
+      "options": [
+        { "name": ["--global", "-g"], "description": "Update global packages" }
+      ]
+    },
+    {
+      "name": "ls",
+      "description": "List installed packages",
+      "options": [
+        { "name": ["--all"], "description": "Show all packages" },
+        { "name": ["--depth"], "description": "Max display depth of the dependency tree" },
+        { "name": ["--global", "-g"], "description": "List global packages" },
+        { "name": ["--json"], "description": "Output in JSON format" }
+      ]
+    },
+    {
+      "name": "audit",
+      "description": "Run a security audit",
+      "options": [
+        { "name": ["--fix"], "description": "Apply remediations to the package tree" },
+        { "name": ["--json"], "description": "Output in JSON format" },
+        { "name": ["--production"], "description": "Only audit production dependencies" }
+      ]
+    }
+  ]
+}

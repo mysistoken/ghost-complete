@@ -1,0 +1,147 @@
+{
+  "name": "cargo",
+  "description": "Rust package manager",
+  "subcommands": [
+    {
+      "name": "build",
+      "description": "Compile the current package",
+      "options": [
+        { "name": ["--release"], "description": "Build with optimizations" },
+        { "name": ["-p", "--package"], "description": "Package to build" },
+        { "name": ["--bin"], "description": "Build only the specified binary" },
+        { "name": ["--example"], "description": "Build only the specified example" },
+        { "name": ["--features"], "description": "Space or comma separated list of features to activate" },
+        { "name": ["--all-features"], "description": "Activate all available features" },
+        { "name": ["--target"], "description": "Build for the target triple" }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run a binary or example",
+      "options": [
+        { "name": ["--release"], "description": "Build with optimizations" },
+        { "name": ["-p", "--package"], "description": "Package with the target to run" },
+        { "name": ["--bin"], "description": "Name of the bin target to run" },
+        { "name": ["--example"], "description": "Name of the example target to run" },
+        { "name": ["--features"], "description": "Features to activate" }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Run the tests",
+      "options": [
+        { "name": ["-p", "--package"], "description": "Package to test" },
+        { "name": ["--release"], "description": "Build with optimizations" },
+        { "name": ["--lib"], "description": "Test only library" },
+        { "name": ["--doc"], "description": "Test only documentation" },
+        { "name": ["--features"], "description": "Features to activate" },
+        { "name": ["--no-fail-fast"], "description": "Run all tests regardless of failure" }
+      ]
+    },
+    {
+      "name": "check",
+      "description": "Check a local package and all of its dependencies for errors",
+      "options": [
+        { "name": ["-p", "--package"], "description": "Package to check" },
+        { "name": ["--all-targets"], "description": "Check all targets" },
+        { "name": ["--features"], "description": "Features to activate" }
+      ]
+    },
+    {
+      "name": "clippy",
+      "description": "Run Clippy lints",
+      "options": [
+        { "name": ["--all-targets"], "description": "Check all targets" },
+        { "name": ["-p", "--package"], "description": "Package to check" },
+        { "name": ["--fix"], "description": "Automatically apply lint suggestions" },
+        { "name": ["--features"], "description": "Features to activate" }
+      ]
+    },
+    {
+      "name": "fmt",
+      "description": "Format Rust code",
+      "options": [
+        { "name": ["--check"], "description": "Run in check mode" },
+        { "name": ["-p", "--package"], "description": "Package to format" },
+        { "name": ["--all"], "description": "Format all packages in the workspace" }
+      ]
+    },
+    {
+      "name": "add",
+      "description": "Add dependencies to a Cargo.toml manifest",
+      "args": [
+        { "name": "crate", "description": "Crate to add" }
+      ],
+      "options": [
+        { "name": ["--dev", "-D"], "description": "Add as development dependency" },
+        { "name": ["--build", "-B"], "description": "Add as build dependency" },
+        { "name": ["--features", "-F"], "description": "Features to enable" },
+        { "name": ["--no-default-features"], "description": "Disable default features" }
+      ]
+    },
+    {
+      "name": "remove",
+      "description": "Remove dependencies from a Cargo.toml manifest",
+      "args": [
+        { "name": "crate", "description": "Crate to remove" }
+      ],
+      "options": [
+        { "name": ["--dev"], "description": "Remove from dev-dependencies" },
+        { "name": ["--build"], "description": "Remove from build-dependencies" }
+      ]
+    },
+    {
+      "name": "doc",
+      "description": "Build package documentation",
+      "options": [
+        { "name": ["--open"], "description": "Open docs in browser after building" },
+        { "name": ["-p", "--package"], "description": "Package to document" },
+        { "name": ["--no-deps"], "description": "Do not build docs for dependencies" }
+      ]
+    },
+    {
+      "name": "bench",
+      "description": "Run the benchmarks",
+      "options": [
+        { "name": ["-p", "--package"], "description": "Package to benchmark" },
+        { "name": ["--features"], "description": "Features to activate" }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Remove generated artifacts",
+      "options": [
+        { "name": ["-p", "--package"], "description": "Package to clean artifacts for" },
+        { "name": ["--release"], "description": "Clean release artifacts" }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update dependencies in Cargo.lock",
+      "options": [
+        { "name": ["-p", "--package"], "description": "Package to update" },
+        { "name": ["--dry-run"], "description": "Show what would be updated" }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Install a Rust binary",
+      "args": [
+        { "name": "crate", "description": "Crate to install" }
+      ],
+      "options": [
+        { "name": ["--path"], "description": "Install from local path", "template": "filepaths" },
+        { "name": ["--git"], "description": "Install from git URL" },
+        { "name": ["--force", "-f"], "description": "Force overwriting existing crates" }
+      ]
+    },
+    {
+      "name": "publish",
+      "description": "Upload a package to the registry",
+      "options": [
+        { "name": ["--dry-run"], "description": "Perform all checks without uploading" },
+        { "name": ["--allow-dirty"], "description": "Allow dirty working directories" }
+      ]
+    }
+  ]
+}

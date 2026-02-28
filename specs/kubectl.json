@@ -1,0 +1,185 @@
+{
+  "name": "kubectl",
+  "description": "Kubernetes command-line tool",
+  "subcommands": [
+    {
+      "name": "get",
+      "description": "Display one or many resources",
+      "args": [
+        {
+          "name": "resource",
+          "description": "Resource type",
+          "suggestions": [
+            "pods", "services", "deployments", "replicasets", "statefulsets",
+            "daemonsets", "jobs", "cronjobs", "configmaps", "secrets",
+            "namespaces", "nodes", "ingresses", "persistentvolumeclaims",
+            "persistentvolumes", "serviceaccounts", "events", "endpoints"
+          ]
+        }
+      ],
+      "options": [
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" },
+        { "name": ["-o", "--output"], "description": "Output format (json, yaml, wide, name)" },
+        { "name": ["-l", "--selector"], "description": "Label selector" },
+        { "name": ["--all-namespaces", "-A"], "description": "List across all namespaces" },
+        { "name": ["-w", "--watch"], "description": "Watch for changes" }
+      ]
+    },
+    {
+      "name": "describe",
+      "description": "Show details of a specific resource",
+      "args": [
+        {
+          "name": "resource",
+          "description": "Resource type",
+          "suggestions": [
+            "pods", "services", "deployments", "nodes", "configmaps",
+            "secrets", "namespaces", "ingresses", "persistentvolumeclaims"
+          ]
+        }
+      ],
+      "options": [
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" }
+      ]
+    },
+    {
+      "name": "apply",
+      "description": "Apply a configuration to a resource",
+      "options": [
+        { "name": ["-f", "--filename"], "description": "Filename or directory", "template": "filepaths" },
+        { "name": ["-k", "--kustomize"], "description": "Kustomize directory", "template": "filepaths" },
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" },
+        { "name": ["--dry-run"], "description": "Dry run mode (none, client, server)" }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete resources",
+      "args": [
+        {
+          "name": "resource",
+          "description": "Resource type",
+          "suggestions": [
+            "pods", "services", "deployments", "configmaps", "secrets",
+            "jobs", "cronjobs", "ingresses", "namespaces"
+          ]
+        }
+      ],
+      "options": [
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" },
+        { "name": ["-f", "--filename"], "description": "Filename or directory", "template": "filepaths" },
+        { "name": ["-l", "--selector"], "description": "Label selector" },
+        { "name": ["--all"], "description": "Delete all resources" },
+        { "name": ["--force"], "description": "Force deletion" }
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "Print the logs for a container in a pod",
+      "options": [
+        { "name": ["-f", "--follow"], "description": "Follow the log stream" },
+        { "name": ["-c", "--container"], "description": "Container name" },
+        { "name": ["--tail"], "description": "Lines of recent log to display" },
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" },
+        { "name": ["--previous", "-p"], "description": "Print logs of previous instance" },
+        { "name": ["--timestamps"], "description": "Include timestamps" }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Execute a command in a container",
+      "options": [
+        { "name": ["-it"], "description": "Interactive with TTY" },
+        { "name": ["-c", "--container"], "description": "Container name" },
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" }
+      ]
+    },
+    {
+      "name": "create",
+      "description": "Create a resource",
+      "subcommands": [
+        {
+          "name": "namespace",
+          "description": "Create a namespace"
+        },
+        {
+          "name": "deployment",
+          "description": "Create a deployment",
+          "options": [
+            { "name": ["--image"], "description": "Container image" },
+            { "name": ["--replicas"], "description": "Number of replicas" }
+          ]
+        },
+        {
+          "name": "service",
+          "description": "Create a service"
+        },
+        {
+          "name": "configmap",
+          "description": "Create a configmap",
+          "options": [
+            { "name": ["--from-file"], "description": "Key file to add", "template": "filepaths" },
+            { "name": ["--from-literal"], "description": "Key=value pair to add" }
+          ]
+        },
+        {
+          "name": "secret",
+          "description": "Create a secret"
+        }
+      ],
+      "options": [
+        { "name": ["-f", "--filename"], "description": "Filename or directory", "template": "filepaths" },
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" }
+      ]
+    },
+    {
+      "name": "edit",
+      "description": "Edit a resource",
+      "args": [
+        {
+          "name": "resource",
+          "description": "Resource type",
+          "suggestions": [
+            "pods", "services", "deployments", "configmaps", "secrets"
+          ]
+        }
+      ],
+      "options": [
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" }
+      ]
+    },
+    {
+      "name": "scale",
+      "description": "Set a new size for a resource",
+      "options": [
+        { "name": ["--replicas"], "description": "New desired number of replicas" },
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" }
+      ]
+    },
+    {
+      "name": "rollout",
+      "description": "Manage the rollout of a resource",
+      "subcommands": [
+        {
+          "name": "status",
+          "description": "Show the status of the rollout"
+        },
+        {
+          "name": "history",
+          "description": "View rollout history"
+        },
+        {
+          "name": "undo",
+          "description": "Undo a previous rollout"
+        },
+        {
+          "name": "restart",
+          "description": "Restart a resource"
+        }
+      ],
+      "options": [
+        { "name": ["-n", "--namespace"], "description": "Kubernetes namespace" }
+      ]
+    }
+  ]
+}
