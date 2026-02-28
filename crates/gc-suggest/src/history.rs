@@ -7,15 +7,15 @@ use gc_buffer::CommandContext;
 use crate::provider::Provider;
 use crate::types::{Suggestion, SuggestionKind, SuggestionSource};
 
-const MAX_ENTRIES: usize = 10_000;
+pub const DEFAULT_MAX_HISTORY_ENTRIES: usize = 10_000;
 
 pub struct HistoryProvider {
     entries: Vec<String>,
 }
 
 impl HistoryProvider {
-    pub fn load() -> Self {
-        let entries = match Self::read_history() {
+    pub fn load(max_entries: usize) -> Self {
+        let entries = match Self::read_history(max_entries) {
             Ok(entries) => entries,
             Err(e) => {
                 tracing::debug!("failed to load history: {e}");
@@ -31,11 +31,11 @@ impl HistoryProvider {
         Self { entries }
     }
 
-    fn read_history() -> Result<Vec<String>> {
+    fn read_history(max_entries: usize) -> Result<Vec<String>> {
         let path = Self::history_path()?;
         let raw = std::fs::read(&path)?;
         let contents = String::from_utf8_lossy(&raw);
-        Ok(Self::parse_and_dedup(&contents))
+        Ok(Self::parse_and_dedup(&contents, max_entries))
     }
 
     fn history_path() -> Result<std::path::PathBuf> {
@@ -49,7 +49,7 @@ impl HistoryProvider {
         anyhow::bail!("could not determine history file path")
     }
 
-    fn parse_and_dedup(contents: &str) -> Vec<String> {
+    fn parse_and_dedup(contents: &str, max_entries: usize) -> Vec<String> {
         let mut seen = HashSet::new();
         let mut entries = Vec::new();
 
@@ -62,7 +62,7 @@ impl HistoryProvider {
             if seen.insert(cmd.to_string()) {
                 entries.push(cmd.to_string());
             }
-            if entries.len() >= MAX_ENTRIES {
+            if entries.len() >= max_entries {
                 break;
             }
         }
