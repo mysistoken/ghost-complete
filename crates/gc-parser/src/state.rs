@@ -18,6 +18,7 @@ pub struct TerminalState {
     command_buffer: Option<String>,
     buffer_cursor: usize,
     buffer_dirty: bool,
+    cwd_dirty: bool,
 }
 
 impl TerminalState {
@@ -34,6 +35,7 @@ impl TerminalState {
             command_buffer: None,
             buffer_cursor: 0,
             buffer_dirty: false,
+            cwd_dirty: false,
         }
     }
 
@@ -76,6 +78,14 @@ impl TerminalState {
     pub fn take_buffer_dirty(&mut self) -> bool {
         let dirty = self.buffer_dirty;
         self.buffer_dirty = false;
+        dirty
+    }
+
+    /// Returns true if the CWD changed since the last check,
+    /// and clears the flag atomically.
+    pub fn take_cwd_dirty(&mut self) -> bool {
+        let dirty = self.cwd_dirty;
+        self.cwd_dirty = false;
         dirty
     }
 
@@ -166,7 +176,10 @@ impl TerminalState {
     }
 
     pub(crate) fn set_cwd(&mut self, path: PathBuf) {
-        self.cwd = Some(path);
+        if self.cwd.as_ref() != Some(&path) {
+            self.cwd = Some(path);
+            self.cwd_dirty = true;
+        }
     }
 
     pub(crate) fn set_command_buffer(&mut self, buffer: String, cursor: usize) {

@@ -512,6 +512,34 @@ mod tests {
         assert!(!p.state_mut().take_buffer_dirty());
     }
 
+    // -- OSC 7 cwd_dirty flag --
+
+    #[test]
+    fn test_osc7_sets_cwd_dirty() {
+        let mut p = make_parser();
+        assert!(!p.state_mut().take_cwd_dirty());
+        p.process_bytes(b"\x1b]7;file://localhost/Users/test\x07");
+        assert!(p.state_mut().take_cwd_dirty());
+    }
+
+    #[test]
+    fn test_take_cwd_dirty_clears_flag() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7;file://localhost/Users/test\x07");
+        assert!(p.state_mut().take_cwd_dirty());
+        assert!(!p.state_mut().take_cwd_dirty());
+    }
+
+    #[test]
+    fn test_osc7_same_path_not_dirty() {
+        let mut p = make_parser();
+        p.process_bytes(b"\x1b]7;file://localhost/Users/test\x07");
+        assert!(p.state_mut().take_cwd_dirty());
+        // Same path again — should NOT set dirty
+        p.process_bytes(b"\x1b]7;file://localhost/Users/test\x07");
+        assert!(!p.state_mut().take_cwd_dirty());
+    }
+
     #[test]
     fn test_percent_decode() {
         assert_eq!(percent_decode("/hello%20world"), "/hello world");
