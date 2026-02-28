@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use gc_buffer::parse_command_context;
-use gc_overlay::types::{OverlayState, PopupLayout, DEFAULT_MAX_POPUP_WIDTH, DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH};
+use gc_overlay::types::{
+    OverlayState, PopupLayout, DEFAULT_MAX_POPUP_WIDTH, DEFAULT_MAX_VISIBLE,
+    DEFAULT_MIN_POPUP_WIDTH,
+};
 use gc_overlay::{clear_popup, render_popup};
 use gc_parser::TerminalParser;
 use gc_suggest::{Suggestion, SuggestionEngine};
@@ -52,6 +55,7 @@ impl InputHandler {
         self
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_suggest_config(
         self,
         max_results: usize,
@@ -114,7 +118,8 @@ impl InputHandler {
                 Vec::new()
             }
             KeyEvent::ArrowDown => {
-                self.overlay.move_down(self.suggestions.len(), self.max_visible);
+                self.overlay
+                    .move_down(self.suggestions.len(), self.max_visible);
                 self.render(parser, stdout);
                 Vec::new()
             }
@@ -334,8 +339,10 @@ pub fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gc_overlay::types::{
+        DEFAULT_MAX_POPUP_WIDTH, DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH,
+    };
     use gc_suggest::{SuggestionKind, SuggestionSource};
-    use gc_overlay::types::{DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH, DEFAULT_MAX_POPUP_WIDTH};
 
     #[test]
     fn test_should_trigger_on_space() {

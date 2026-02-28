@@ -3,24 +3,13 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct GhostConfig {
     pub trigger: TriggerConfig,
     pub popup: PopupConfig,
     pub suggest: SuggestConfig,
     pub paths: PathsConfig,
-}
-
-impl Default for GhostConfig {
-    fn default() -> Self {
-        Self {
-            trigger: TriggerConfig::default(),
-            popup: PopupConfig::default(),
-            suggest: SuggestConfig::default(),
-            paths: PathsConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,18 +84,10 @@ impl Default for ProvidersConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct PathsConfig {
     pub spec_dirs: Vec<String>,
-}
-
-impl Default for PathsConfig {
-    fn default() -> Self {
-        Self {
-            spec_dirs: Vec::new(),
-        }
-    }
 }
 
 impl GhostConfig {
@@ -114,8 +95,7 @@ impl GhostConfig {
         let config_path = match path {
             Some(p) => PathBuf::from(p),
             None => {
-                let config_dir = dirs::config_dir()
-                    .unwrap_or_else(|| PathBuf::from("~/.config"));
+                let config_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
                 config_dir.join("ghost-complete").join("config.toml")
             }
         };
@@ -220,6 +200,9 @@ spec_dirs = ["/usr/local/share/ghost-complete/specs"]
         assert!(config.suggest.providers.commands);
         assert!(!config.suggest.providers.history);
         assert!(!config.suggest.providers.git);
-        assert_eq!(config.paths.spec_dirs, vec!["/usr/local/share/ghost-complete/specs"]);
+        assert_eq!(
+            config.paths.spec_dirs,
+            vec!["/usr/local/share/ghost-complete/specs"]
+        );
     }
 }

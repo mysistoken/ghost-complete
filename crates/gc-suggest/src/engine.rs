@@ -7,7 +7,7 @@ use crate::commands::CommandsProvider;
 use crate::filesystem::FilesystemProvider;
 use crate::fuzzy;
 use crate::git;
-use crate::history::HistoryProvider;
+use crate::history::{HistoryProvider, DEFAULT_MAX_HISTORY_ENTRIES};
 use crate::provider::Provider;
 use crate::specs::{self, SpecStore};
 use crate::types::{Suggestion, SuggestionKind};
@@ -30,7 +30,7 @@ impl SuggestionEngine {
         Ok(Self {
             spec_store: SpecStore::load_from_dir(spec_dir)?,
             filesystem_provider: FilesystemProvider::new(),
-            history_provider: HistoryProvider::load(fuzzy::DEFAULT_MAX_RESULTS),
+            history_provider: HistoryProvider::load(DEFAULT_MAX_HISTORY_ENTRIES),
             commands_provider: CommandsProvider::from_path_env(),
             max_results: fuzzy::DEFAULT_MAX_RESULTS,
             providers_commands: true,
@@ -41,6 +41,7 @@ impl SuggestionEngine {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_suggest_config(
         mut self,
         max_results: usize,
@@ -333,7 +334,9 @@ mod tests {
         let results = engine.suggest_sync(&ctx, Path::new("/tmp")).unwrap();
         // Commands provider disabled — should not find "git" from commands
         assert!(
-            !results.iter().any(|s| s.source == crate::types::SuggestionSource::Commands),
+            !results
+                .iter()
+                .any(|s| s.source == crate::types::SuggestionSource::Commands),
             "should not have commands when provider disabled"
         );
     }

@@ -65,8 +65,8 @@ fn main() -> Result<()> {
         (shell, args)
     };
 
-    let config = gc_config::GhostConfig::load(cli.config.as_deref())
-        .context("failed to load config")?;
+    let config =
+        gc_config::GhostConfig::load(cli.config.as_deref()).context("failed to load config")?;
 
     tracing::info!(shell = %shell, "starting ghost-complete proxy");
 

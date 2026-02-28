@@ -291,6 +291,7 @@ dependencies = [
  "anyhow",
  "dirs",
  "serde",
+ "tempfile",
  "toml",
 ]
 
@@ -317,7 +318,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "dirs",
  "gc-buffer",
+ "gc-config",
  "gc-overlay",
  "gc-parser",
  "gc-suggest",
@@ -372,6 +375,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "gc-config",
  "gc-pty",
  "tokio",
  "tracing",

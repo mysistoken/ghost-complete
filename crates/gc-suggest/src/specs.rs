@@ -357,8 +357,14 @@ mod tests {
             quote_state: gc_buffer::QuoteState::None,
         };
         let res = resolve_spec(&spec, &ctx);
-        assert!(res.wants_folders_only, "folders template should set wants_folders_only");
-        assert!(!res.wants_filepaths, "folders template should NOT set wants_filepaths");
+        assert!(
+            res.wants_folders_only,
+            "folders template should set wants_folders_only"
+        );
+        assert!(
+            !res.wants_filepaths,
+            "folders template should NOT set wants_filepaths"
+        );
     }
 
     #[test]
@@ -384,7 +390,13 @@ mod tests {
             quote_state: gc_buffer::QuoteState::None,
         };
         let res = resolve_spec(&spec, &ctx);
-        assert!(res.wants_filepaths, "filepaths template should set wants_filepaths");
-        assert!(!res.wants_folders_only, "filepaths template should NOT set wants_folders_only");
+        assert!(
+            res.wants_filepaths,
+            "filepaths template should set wants_filepaths"
+        );
+        assert!(
+            !res.wants_folders_only,
+            "filepaths template should NOT set wants_folders_only"
+        );
     }
 }

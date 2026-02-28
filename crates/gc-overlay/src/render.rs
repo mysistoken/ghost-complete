@@ -8,6 +8,7 @@ use crate::types::{OverlayState, PopupLayout};
 
 /// Render a popup into a byte buffer. Returns the layout used for positioning
 /// (needed later for cleanup).
+#[allow(clippy::too_many_arguments)]
 pub fn render_popup(
     buf: &mut Vec<u8>,
     suggestions: &[Suggestion],
@@ -171,8 +172,16 @@ mod tests {
         let suggestions = make_suggestions();
         let state = OverlayState::new();
         render_popup(
-            &mut buf, &suggestions, &state, 5, 0, 24, 80,
-            DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH, DEFAULT_MAX_POPUP_WIDTH,
+            &mut buf,
+            &suggestions,
+            &state,
+            5,
+            0,
+            24,
+            80,
+            DEFAULT_MAX_VISIBLE,
+            DEFAULT_MIN_POPUP_WIDTH,
+            DEFAULT_MAX_POPUP_WIDTH,
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(
@@ -188,8 +197,16 @@ mod tests {
         let suggestions = make_suggestions();
         let state = OverlayState::new();
         render_popup(
-            &mut buf, &suggestions, &state, 5, 0, 24, 80,
-            DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH, DEFAULT_MAX_POPUP_WIDTH,
+            &mut buf,
+            &suggestions,
+            &state,
+            5,
+            0,
+            24,
+            80,
+            DEFAULT_MAX_VISIBLE,
+            DEFAULT_MIN_POPUP_WIDTH,
+            DEFAULT_MAX_POPUP_WIDTH,
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(output.contains("\x1b7"), "should contain save cursor");
@@ -202,8 +219,16 @@ mod tests {
         let suggestions = make_suggestions();
         let state = OverlayState::new();
         render_popup(
-            &mut buf, &suggestions, &state, 5, 0, 24, 80,
-            DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH, DEFAULT_MAX_POPUP_WIDTH,
+            &mut buf,
+            &suggestions,
+            &state,
+            5,
+            0,
+            24,
+            80,
+            DEFAULT_MAX_VISIBLE,
+            DEFAULT_MIN_POPUP_WIDTH,
+            DEFAULT_MAX_POPUP_WIDTH,
         );
         let output = String::from_utf8_lossy(&buf);
         // Popup below cursor at row 5 → starts at row 6 (1-indexed: 7)
@@ -219,8 +244,16 @@ mod tests {
         let suggestions = make_suggestions();
         let state = OverlayState::new(); // selected = 0
         render_popup(
-            &mut buf, &suggestions, &state, 5, 0, 24, 80,
-            DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH, DEFAULT_MAX_POPUP_WIDTH,
+            &mut buf,
+            &suggestions,
+            &state,
+            5,
+            0,
+            24,
+            80,
+            DEFAULT_MAX_VISIBLE,
+            DEFAULT_MIN_POPUP_WIDTH,
+            DEFAULT_MAX_POPUP_WIDTH,
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(
@@ -298,8 +331,16 @@ mod tests {
         state.scroll_offset = 5;
         state.selected = 5;
         let layout = render_popup(
-            &mut buf, &suggestions, &state, 5, 0, 24, 80,
-            DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH, DEFAULT_MAX_POPUP_WIDTH,
+            &mut buf,
+            &suggestions,
+            &state,
+            5,
+            0,
+            24,
+            80,
+            DEFAULT_MAX_VISIBLE,
+            DEFAULT_MIN_POPUP_WIDTH,
+            DEFAULT_MAX_POPUP_WIDTH,
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(
@@ -319,8 +360,16 @@ mod tests {
         let suggestions: Vec<Suggestion> = vec![];
         let state = OverlayState::new();
         let layout = render_popup(
-            &mut buf, &suggestions, &state, 5, 0, 24, 80,
-            DEFAULT_MAX_VISIBLE, DEFAULT_MIN_POPUP_WIDTH, DEFAULT_MAX_POPUP_WIDTH,
+            &mut buf,
+            &suggestions,
+            &state,
+            5,
+            0,
+            24,
+            80,
+            DEFAULT_MAX_VISIBLE,
+            DEFAULT_MIN_POPUP_WIDTH,
+            DEFAULT_MAX_POPUP_WIDTH,
         );
         assert_eq!(layout.height, 0);
         assert!(
