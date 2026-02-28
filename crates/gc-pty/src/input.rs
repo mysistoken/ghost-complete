@@ -1,0 +1,239 @@
+/// Minimal key event parser for raw terminal stdin bytes.
+///
+/// Parses known sequences (arrows, Tab, Enter, Escape, Ctrl+Space) and
+/// passes through everything else as Raw bytes.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyEvent {
+    Tab,
+    Enter,
+    Escape,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    CtrlSpace,
+    Backspace,
+    Printable(char),
+    /// Unknown bytes — forward verbatim to PTY.
+    Raw(Vec<u8>),
+}
+
+/// Parse a buffer of raw stdin bytes into key events.
+///
+/// One read() call can contain multiple keystrokes (e.g. fast typing or
+/// paste). This returns them all in order.
+pub fn parse_keys(buf: &[u8]) -> Vec<KeyEvent> {
+    let mut events = Vec::new();
+    let mut i = 0;
+
+    while i < buf.len() {
+        match buf[i] {
+            0x00 => {
+                events.push(KeyEvent::CtrlSpace);
+                i += 1;
+            }
+            0x09 => {
+                events.push(KeyEvent::Tab);
+                i += 1;
+            }
+            0x0D => {
+                events.push(KeyEvent::Enter);
+                i += 1;
+            }
+            0x7F => {
+                events.push(KeyEvent::Backspace);
+                i += 1;
+            }
+            0x1B => {
+                // Escape or CSI sequence
+                if i + 2 < buf.len() && buf[i + 1] == b'[' {
+                    match buf[i + 2] {
+                        b'A' => {
+                            events.push(KeyEvent::ArrowUp);
+                            i += 3;
+                        }
+                        b'B' => {
+                            events.push(KeyEvent::ArrowDown);
+                            i += 3;
+                        }
+                        b'C' => {
+                            events.push(KeyEvent::ArrowRight);
+                            i += 3;
+                        }
+                        b'D' => {
+                            events.push(KeyEvent::ArrowLeft);
+                            i += 3;
+                        }
+                        _ => {
+                            // Unknown CSI — find end and pass through as Raw
+                            let start = i;
+                            i += 3;
+                            // CSI params: bytes in 0x30-0x3F, intermediates: 0x20-0x2F
+                            // Final byte: 0x40-0x7E
+                            while i < buf.len() && buf[i] < 0x40 {
+                                i += 1;
+                            }
+                            if i < buf.len() {
+                                i += 1; // consume final byte
+                            }
+                            events.push(KeyEvent::Raw(buf[start..i].to_vec()));
+                        }
+                    }
+                } else if i + 2 < buf.len() && buf[i + 1] == b'O' {
+                    // SS3 sequences (some terminals use ESC O A for arrow keys)
+                    match buf[i + 2] {
+                        b'A' => {
+                            events.push(KeyEvent::ArrowUp);
+                            i += 3;
+                        }
+                        b'B' => {
+                            events.push(KeyEvent::ArrowDown);
+                            i += 3;
+                        }
+                        b'C' => {
+                            events.push(KeyEvent::ArrowRight);
+                            i += 3;
+                        }
+                        b'D' => {
+                            events.push(KeyEvent::ArrowLeft);
+                            i += 3;
+                        }
+                        _ => {
+                            events.push(KeyEvent::Raw(buf[i..i + 3].to_vec()));
+                            i += 3;
+                        }
+                    }
+                } else if i + 1 == buf.len() {
+                    // Standalone ESC at end of buffer
+                    events.push(KeyEvent::Escape);
+                    i += 1;
+                } else if i + 1 < buf.len() && buf[i + 1] != b'[' && buf[i + 1] != b'O' {
+                    // ESC followed by something that's not [ or O (Alt+key)
+                    events.push(KeyEvent::Raw(buf[i..i + 2].to_vec()));
+                    i += 2;
+                } else {
+                    // ESC [ or ESC O but buffer too short — treat as raw
+                    events.push(KeyEvent::Raw(buf[i..].to_vec()));
+                    i = buf.len();
+                }
+            }
+            b if (0x20..=0x7E).contains(&b) => {
+                events.push(KeyEvent::Printable(b as char));
+                i += 1;
+            }
+            _ => {
+                // Control char or high byte — pass through
+                events.push(KeyEvent::Raw(vec![buf[i]]));
+                i += 1;
+            }
+        }
+    }
+
+    events
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_printable_chars() {
+        let events = parse_keys(b"abc");
+        assert_eq!(
+            events,
+            vec![
+                KeyEvent::Printable('a'),
+                KeyEvent::Printable('b'),
+                KeyEvent::Printable('c'),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tab() {
+        let events = parse_keys(b"\x09");
+        assert_eq!(events, vec![KeyEvent::Tab]);
+    }
+
+    #[test]
+    fn test_enter() {
+        let events = parse_keys(b"\x0D");
+        assert_eq!(events, vec![KeyEvent::Enter]);
+    }
+
+    #[test]
+    fn test_backspace() {
+        let events = parse_keys(b"\x7F");
+        assert_eq!(events, vec![KeyEvent::Backspace]);
+    }
+
+    #[test]
+    fn test_ctrl_space() {
+        let events = parse_keys(b"\x00");
+        assert_eq!(events, vec![KeyEvent::CtrlSpace]);
+    }
+
+    #[test]
+    fn test_arrow_keys_csi() {
+        assert_eq!(parse_keys(b"\x1B[A"), vec![KeyEvent::ArrowUp]);
+        assert_eq!(parse_keys(b"\x1B[B"), vec![KeyEvent::ArrowDown]);
+        assert_eq!(parse_keys(b"\x1B[C"), vec![KeyEvent::ArrowRight]);
+        assert_eq!(parse_keys(b"\x1B[D"), vec![KeyEvent::ArrowLeft]);
+    }
+
+    #[test]
+    fn test_arrow_keys_ss3() {
+        assert_eq!(parse_keys(b"\x1BOA"), vec![KeyEvent::ArrowUp]);
+        assert_eq!(parse_keys(b"\x1BOB"), vec![KeyEvent::ArrowDown]);
+    }
+
+    #[test]
+    fn test_standalone_escape() {
+        let events = parse_keys(b"\x1B");
+        assert_eq!(events, vec![KeyEvent::Escape]);
+    }
+
+    #[test]
+    fn test_unknown_csi_passthrough() {
+        // e.g. ESC [ 1 ; 5 C (Ctrl+Right in some terminals)
+        let raw = b"\x1B[1;5C";
+        let events = parse_keys(raw);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            KeyEvent::Raw(bytes) => assert_eq!(bytes, raw),
+            other => panic!("expected Raw, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_mixed_input() {
+        // "a" then ArrowUp then "b"
+        let events = parse_keys(b"a\x1B[Ab");
+        assert_eq!(
+            events,
+            vec![
+                KeyEvent::Printable('a'),
+                KeyEvent::ArrowUp,
+                KeyEvent::Printable('b'),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_empty_input() {
+        let events = parse_keys(b"");
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_alt_key_passthrough() {
+        // Alt+a = ESC a — should be Raw
+        let events = parse_keys(b"\x1Ba");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            KeyEvent::Raw(bytes) => assert_eq!(bytes, b"\x1Ba"),
+            other => panic!("expected Raw, got {:?}", other),
+        }
+    }
+}

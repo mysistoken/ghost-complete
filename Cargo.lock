@@ -317,7 +317,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "gc-buffer",
+ "gc-overlay",
  "gc-parser",
+ "gc-suggest",
  "nix 0.29.0",
  "portable-pty",
  "tokio",

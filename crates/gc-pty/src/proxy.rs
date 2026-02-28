@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -6,6 +7,8 @@ use gc_parser::TerminalParser;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 
+use crate::handler::InputHandler;
+use crate::input::parse_keys;
 use crate::resize::{get_terminal_size, resize_pty};
 use crate::spawn::{spawn_shell, SpawnedShell};
 
@@ -28,7 +31,8 @@ impl Drop for RawModeGuard {
 /// Run the PTY proxy event loop. This is the main entry point for the proxy.
 ///
 /// Spawns the given shell, enters raw mode, and forwards all I/O between
-/// stdin/stdout and the PTY until the shell exits.
+/// stdin/stdout and the PTY until the shell exits. Keystrokes are routed
+/// through the InputHandler for suggestion popup interception.
 ///
 /// Returns the shell's exit code.
 pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
@@ -46,14 +50,29 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
     let parser = Arc::new(Mutex::new(TerminalParser::new(rows, cols)));
 
+    // Initialize suggestion handler
+    let spec_dir = spec_directory();
+    let handler = Arc::new(Mutex::new(InputHandler::new(&spec_dir).unwrap_or_else(
+        |e| {
+            tracing::warn!(
+                "failed to init suggestion engine: {}, suggestions disabled",
+                e
+            );
+            InputHandler::new(std::path::Path::new(".")).expect("fallback handler")
+        },
+    )));
+
     // Channel to signal that one of the I/O tasks has finished
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
-    // Task A: stdin → PTY (user keystrokes to shell)
+    // Task A: stdin → PTY (user keystrokes to shell, with popup interception)
     let stdin_shutdown = shutdown_tx.clone();
     let mut pty_writer = writer;
+    let parser_for_stdin = Arc::clone(&parser);
+    let handler_for_stdin = Arc::clone(&handler);
     let stdin_handle = tokio::task::spawn_blocking(move || {
         let mut stdin = std::io::stdin().lock();
+        let mut stdout = std::io::stdout().lock();
         let mut buf = [0u8; 256];
         loop {
             let n = match stdin.read(&mut buf) {
@@ -62,11 +81,21 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
                 Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             };
-            if pty_writer.write_all(&buf[..n]).is_err() {
-                break;
-            }
-            if pty_writer.flush().is_err() {
-                break;
+
+            let keys = parse_keys(&buf[..n]);
+            for key in &keys {
+                let forward = {
+                    let mut h = handler_for_stdin.lock().unwrap();
+                    h.process_key(key, &parser_for_stdin, &mut stdout)
+                };
+                if !forward.is_empty() {
+                    if pty_writer.write_all(&forward).is_err() {
+                        return;
+                    }
+                    if pty_writer.flush().is_err() {
+                        return;
+                    }
+                }
             }
         }
         let _ = stdin_shutdown.try_send(());
@@ -123,8 +152,16 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
                             tracing::warn!("failed to resize PTY: {}", e);
                         }
                         // Update parser's screen dimensions
-                        let mut p = parser.lock().unwrap();
-                        p.state_mut().update_dimensions(size.rows, size.cols);
+                        {
+                            let mut p = parser.lock().unwrap();
+                            p.state_mut().update_dimensions(size.rows, size.cols);
+                        }
+                        // Re-render popup if visible
+                        {
+                            let mut stdout = std::io::stdout().lock();
+                            let mut h = handler.lock().unwrap();
+                            h.handle_resize(&parser, &mut stdout);
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("failed to get terminal size for resize: {}", e);
@@ -145,4 +182,22 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
     let exit_code = status.exit_code().try_into().unwrap_or(1);
 
     Ok(exit_code)
+}
+
+/// Find the completion specs directory.
+fn spec_directory() -> PathBuf {
+    // Check for specs/ next to the binary first
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
+    if let Some(dir) = exe_dir {
+        let spec_dir = dir.join("specs");
+        if spec_dir.is_dir() {
+            return spec_dir;
+        }
+    }
+
+    // Fall back to specs/ in the current directory (development)
+    PathBuf::from("specs")
 }

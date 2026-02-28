@@ -11,3 +11,6 @@ nix = { version = "0.29", features = ["signal"] }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 gc-parser = { path = "../gc-parser" }
+gc-buffer = { path = "../gc-buffer" }
+gc-suggest = { path = "../gc-suggest" }
+gc-overlay = { path = "../gc-overlay" }
