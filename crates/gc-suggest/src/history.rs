@@ -33,7 +33,8 @@ impl HistoryProvider {
 
     fn read_history() -> Result<Vec<String>> {
         let path = Self::history_path()?;
-        let contents = std::fs::read_to_string(&path)?;
+        let raw = std::fs::read(&path)?;
+        let contents = String::from_utf8_lossy(&raw);
         Ok(Self::parse_and_dedup(&contents))
     }
 
