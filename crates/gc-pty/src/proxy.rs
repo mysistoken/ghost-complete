@@ -72,7 +72,6 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
     let handler_for_stdin = Arc::clone(&handler);
     let stdin_handle = tokio::task::spawn_blocking(move || {
         let mut stdin = std::io::stdin().lock();
-        let mut stdout = std::io::stdout().lock();
         let mut buf = [0u8; 256];
         loop {
             let n = match stdin.read(&mut buf) {
@@ -84,10 +83,20 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
 
             let keys = parse_keys(&buf[..n]);
             for key in &keys {
+                // Handler writes popup rendering into a buffer instead of
+                // locking stdout for the entire loop (which would deadlock
+                // with Task B's stdout writes).
+                let mut render_buf = Vec::new();
                 let forward = {
                     let mut h = handler_for_stdin.lock().unwrap();
-                    h.process_key(key, &parser_for_stdin, &mut stdout)
+                    h.process_key(key, &parser_for_stdin, &mut render_buf)
                 };
+                // Briefly lock stdout to flush any popup rendering
+                if !render_buf.is_empty() {
+                    let mut stdout = std::io::stdout().lock();
+                    let _ = stdout.write_all(&render_buf);
+                    let _ = stdout.flush();
+                }
                 if !forward.is_empty() {
                     if pty_writer.write_all(&forward).is_err() {
                         return;
@@ -105,7 +114,6 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
     let pty_shutdown = shutdown_tx.clone();
     let parser_for_stdout = Arc::clone(&parser);
     let stdout_handle = tokio::task::spawn_blocking(move || {
-        let mut stdout = std::io::stdout().lock();
         let mut buf = [0u8; 8192];
         loop {
             let n = match reader.read(&mut buf) {
@@ -121,11 +129,16 @@ pub async fn run_proxy(shell: &str, args: &[String]) -> Result<i32> {
                 p.process_bytes(&buf[..n]);
             }
 
-            if stdout.write_all(&buf[..n]).is_err() {
-                break;
-            }
-            if stdout.flush().is_err() {
-                break;
+            // Briefly lock stdout for each write — do NOT hold the lock
+            // across the entire loop or it deadlocks with Task A.
+            {
+                let mut stdout = std::io::stdout().lock();
+                if stdout.write_all(&buf[..n]).is_err() {
+                    break;
+                }
+                if stdout.flush().is_err() {
+                    break;
+                }
             }
         }
         let _ = pty_shutdown.try_send(());
