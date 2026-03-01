@@ -83,10 +83,13 @@ impl Perform for TerminalState {
                     self.set_cursor(0, 0);
                 }
             }
-            // SU — scroll up
-            'S' => self.move_up(csi_param(params, 0, 1)),
-            // SD — scroll down
-            'T' => self.move_down(csi_param(params, 0, 1)),
+            // SU — scroll up: content scrolls, cursor does NOT move
+            'S' => {}
+            // SD — scroll down: content scrolls, cursor does NOT move
+            'T' => {}
+            // ANSI save/restore cursor (SCO sequences)
+            's' => self.save_cursor(),
+            'u' => self.restore_cursor(),
             _ => {}
         }
     }
@@ -117,10 +120,16 @@ impl Perform for TerminalState {
                 }
                 match params[1] {
                     b"A" => {
-                        // Prompt about to be displayed
+                        // Prompt about to be displayed — request CPR sync so
+                        // the proxy can query the real terminal for the actual
+                        // cursor position and correct any VT tracking drift.
+                        self.request_cursor_sync();
                         self.set_prompt_row(self.cursor_row());
                         self.set_in_prompt(true);
-                        tracing::debug!(row = self.cursor_row(), "OSC 133;A — prompt start");
+                        tracing::debug!(
+                            row = self.cursor_row(),
+                            "OSC 133;A — prompt start, CPR sync requested"
+                        );
                     }
                     b"B" => {
                         // Prompt ended, command input starts

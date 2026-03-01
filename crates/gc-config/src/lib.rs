@@ -3,6 +3,11 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+/// Returns `~/.config/ghost-complete`, ignoring macOS `~/Library/Application Support/`.
+pub fn config_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".config").join("ghost-complete"))
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct GhostConfig {
@@ -10,18 +15,46 @@ pub struct GhostConfig {
     pub popup: PopupConfig,
     pub suggest: SuggestConfig,
     pub paths: PathsConfig,
+    pub keybindings: KeybindingsConfig,
+    pub theme: ThemeConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct KeybindingsConfig {
+    pub accept: String,
+    pub accept_and_enter: String,
+    pub dismiss: String,
+    pub navigate_up: String,
+    pub navigate_down: String,
+    pub trigger: String,
+}
+
+impl Default for KeybindingsConfig {
+    fn default() -> Self {
+        Self {
+            accept: "tab".to_string(),
+            accept_and_enter: "enter".to_string(),
+            dismiss: "escape".to_string(),
+            navigate_up: "arrow_up".to_string(),
+            navigate_down: "arrow_down".to_string(),
+            trigger: "ctrl+space".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TriggerConfig {
     pub auto_chars: Vec<char>,
+    pub delay_ms: u64,
 }
 
 impl Default for TriggerConfig {
     fn default() -> Self {
         Self {
             auto_chars: vec![' ', '/', '-', '.'],
+            delay_ms: 150,
         }
     }
 }
@@ -84,6 +117,22 @@ impl Default for ProvidersConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ThemeConfig {
+    pub selected: String,
+    pub description: String,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            selected: "reverse".to_string(),
+            description: "dim".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct PathsConfig {
@@ -95,8 +144,8 @@ impl GhostConfig {
         let config_path = match path {
             Some(p) => PathBuf::from(p),
             None => {
-                let config_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("~/.config"));
-                config_dir.join("ghost-complete").join("config.toml")
+                let dir = config_dir().unwrap_or_else(|| PathBuf::from("."));
+                dir.join("config.toml")
             }
         };
 
@@ -123,6 +172,7 @@ mod tests {
     fn test_default_config_matches_hardcoded() {
         let config = GhostConfig::default();
         assert_eq!(config.trigger.auto_chars, vec![' ', '/', '-', '.']);
+        assert_eq!(config.trigger.delay_ms, 150);
         assert_eq!(config.popup.max_visible, 10);
         assert_eq!(config.popup.min_width, 20);
         assert_eq!(config.popup.max_width, 60);
@@ -134,6 +184,14 @@ mod tests {
         assert!(config.suggest.providers.specs);
         assert!(config.suggest.providers.git);
         assert!(config.paths.spec_dirs.is_empty());
+        assert_eq!(config.keybindings.accept, "tab");
+        assert_eq!(config.keybindings.accept_and_enter, "enter");
+        assert_eq!(config.keybindings.dismiss, "escape");
+        assert_eq!(config.keybindings.navigate_up, "arrow_up");
+        assert_eq!(config.keybindings.navigate_down, "arrow_down");
+        assert_eq!(config.keybindings.trigger, "ctrl+space");
+        assert_eq!(config.theme.selected, "reverse");
+        assert_eq!(config.theme.description, "dim");
     }
 
     #[test]
@@ -166,10 +224,28 @@ max_visible = 5
     }
 
     #[test]
+    fn test_partial_keybindings_override() {
+        let toml_str = r#"
+[keybindings]
+accept = "enter"
+navigate_up = "ctrl+space"
+"#;
+        let config: GhostConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.keybindings.accept, "enter");
+        assert_eq!(config.keybindings.navigate_up, "ctrl+space");
+        // Unset fields keep defaults
+        assert_eq!(config.keybindings.accept_and_enter, "enter");
+        assert_eq!(config.keybindings.dismiss, "escape");
+        assert_eq!(config.keybindings.navigate_down, "arrow_down");
+        assert_eq!(config.keybindings.trigger, "ctrl+space");
+    }
+
+    #[test]
     fn test_full_config_parses() {
         let toml_str = r#"
 [trigger]
 auto_chars = [' ', '/']
+delay_ms = 200
 
 [popup]
 max_visible = 15
@@ -189,9 +265,24 @@ git = false
 
 [paths]
 spec_dirs = ["/usr/local/share/ghost-complete/specs"]
+
+[keybindings]
+accept = "enter"
+accept_and_enter = "tab"
+dismiss = "escape"
+navigate_up = "arrow_up"
+navigate_down = "arrow_down"
+trigger = "ctrl+space"
+
+[theme]
+selected = "bold"
+description = "dim"
 "#;
         let config: GhostConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.trigger.auto_chars, vec![' ', '/']);
+        assert_eq!(config.trigger.delay_ms, 200);
+        assert_eq!(config.theme.selected, "bold");
+        assert_eq!(config.theme.description, "dim");
         assert_eq!(config.popup.max_visible, 15);
         assert_eq!(config.popup.min_width, 25);
         assert_eq!(config.popup.max_width, 80);
@@ -204,5 +295,31 @@ spec_dirs = ["/usr/local/share/ghost-complete/specs"]
             config.paths.spec_dirs,
             vec!["/usr/local/share/ghost-complete/specs"]
         );
+        assert_eq!(config.keybindings.accept, "enter");
+        assert_eq!(config.keybindings.accept_and_enter, "tab");
+    }
+
+    #[test]
+    fn test_partial_theme_override() {
+        let toml_str = r#"
+[theme]
+selected = "bold fg:255"
+"#;
+        let config: GhostConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.theme.selected, "bold fg:255");
+        // Unset field keeps default
+        assert_eq!(config.theme.description, "dim");
+    }
+
+    #[test]
+    fn test_full_theme_config() {
+        let toml_str = r#"
+[theme]
+selected = "fg:255 bg:236"
+description = "dim underline"
+"#;
+        let config: GhostConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.theme.selected, "fg:255 bg:236");
+        assert_eq!(config.theme.description, "dim underline");
     }
 }

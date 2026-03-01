@@ -378,9 +378,12 @@ dependencies = [
  "dirs",
  "gc-config",
  "gc-pty",
+ "gc-suggest",
  "portable-pty",
+ "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

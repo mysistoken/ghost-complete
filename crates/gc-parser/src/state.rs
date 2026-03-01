@@ -19,6 +19,7 @@ pub struct TerminalState {
     buffer_cursor: usize,
     buffer_dirty: bool,
     cwd_dirty: bool,
+    cursor_sync_requested: bool,
 }
 
 impl TerminalState {
@@ -36,6 +37,7 @@ impl TerminalState {
             buffer_cursor: 0,
             buffer_dirty: false,
             cwd_dirty: false,
+            cursor_sync_requested: false,
         }
     }
 
@@ -89,6 +91,27 @@ impl TerminalState {
         dirty
     }
 
+    /// Returns true if a CPR (Cursor Position Report) sync was requested
+    /// since the last check, and clears the flag atomically.
+    pub fn take_cursor_sync_requested(&mut self) -> bool {
+        let requested = self.cursor_sync_requested;
+        self.cursor_sync_requested = false;
+        requested
+    }
+
+    /// Request a CPR-based cursor sync on the next opportunity.
+    pub(crate) fn request_cursor_sync(&mut self) {
+        self.cursor_sync_requested = true;
+    }
+
+    /// Sync cursor position from a CPR response (1-indexed row/col from
+    /// the terminal, converted to 0-indexed internally).
+    pub fn set_cursor_from_report(&mut self, row_1: u16, col_1: u16) {
+        self.cursor_row = row_1.saturating_sub(1);
+        self.cursor_col = col_1.saturating_sub(1);
+        self.clamp_cursor();
+    }
+
     /// Override the command buffer with a predicted value (e.g., after Tab
     /// acceptance in directory chaining). Does NOT set `buffer_dirty` since
     /// this is a local prediction, not a shell-reported update via OSC 7770.
@@ -112,6 +135,8 @@ impl TerminalState {
                 .cursor_row
                 .saturating_add(self.cursor_col / self.screen_cols);
             self.cursor_col %= self.screen_cols;
+            // Wrapping past the bottom row means the terminal scrolled.
+            self.clamp_cursor_row();
         }
     }
 
@@ -149,6 +174,9 @@ impl TerminalState {
 
     pub(crate) fn line_feed(&mut self) {
         self.cursor_row = self.cursor_row.saturating_add(1);
+        // At the bottom of the screen, a real terminal scrolls rather than
+        // moving the cursor past the last row.
+        self.clamp_cursor_row();
     }
 
     pub(crate) fn backspace(&mut self) {

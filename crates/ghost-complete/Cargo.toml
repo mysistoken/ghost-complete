@@ -10,13 +10,16 @@ path = "src/main.rs"
 [dependencies]
 gc-pty = { path = "../gc-pty" }
 gc-config = { path = "../gc-config" }
+gc-suggest = { path = "../gc-suggest" }
 tokio = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 anyhow = { workspace = true }
 dirs = "5"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+serde_json = "1"
 
 [dev-dependencies]
 portable-pty = "0.8"
 tempfile = "3"
+toml = "0.8"

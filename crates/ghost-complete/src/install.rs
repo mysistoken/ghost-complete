@@ -3,6 +3,45 @@ use std::fs;
 use std::path::Path;
 
 const ZSH_INTEGRATION: &str = include_str!("../../../shell/ghost-complete.zsh");
+const BASH_INTEGRATION: &str = include_str!("../../../shell/ghost-complete.bash");
+const FISH_INTEGRATION: &str = include_str!("../../../shell/ghost-complete.fish");
+
+const DEFAULT_CONFIG_TOML: &str = "\
+# Ghost Complete configuration
+# Uncomment and edit values to customize. All values shown are defaults.
+
+# [trigger]
+# auto_chars = [' ', '/', '-', '.']
+# delay_ms = 150
+
+# [popup]
+# max_visible = 10
+# min_width = 20
+# max_width = 60
+
+# [suggest]
+# max_results = 50
+# max_history_entries = 10000
+
+# [suggest.providers]
+# commands = true
+# history = true
+# filesystem = true
+# specs = true
+# git = true
+
+# [keybindings]
+# accept = \"tab\"
+# accept_and_enter = \"enter\"
+# dismiss = \"escape\"
+# navigate_up = \"arrow_up\"
+# navigate_down = \"arrow_down\"
+# trigger = \"ctrl+space\"
+
+[theme]
+selected = \"reverse\"
+description = \"dim\"
+";
 
 const INIT_BEGIN: &str = "# >>> ghost-complete initialize >>>";
 const INIT_END: &str = "# <<< ghost-complete initialize <<<";
@@ -81,20 +120,36 @@ fn copy_specs(config_dir: &Path) -> Result<()> {
         println!("  No bundled specs found, skipping spec installation");
         return Ok(());
     };
+    copy_specs_from(&source, config_dir)
+}
 
+fn copy_specs_from(source: &Path, config_dir: &Path) -> Result<()> {
     let dest = config_dir.join("specs");
-    fs::create_dir_all(&dest)
-        .with_context(|| format!("failed to create {}", dest.display()))?;
+    fs::create_dir_all(&dest).with_context(|| format!("failed to create {}", dest.display()))?;
 
     let mut count = 0;
-    for entry in fs::read_dir(&source)? {
+    let mut skipped = 0;
+    for entry in fs::read_dir(source)? {
         let entry = entry?;
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) == Some("json") {
+            let contents = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read spec: {}", path.display()))?;
+            if let Err(e) = serde_json::from_str::<gc_suggest::CompletionSpec>(&contents) {
+                println!(
+                    "  WARNING: skipping invalid spec {}: {e}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                );
+                skipped += 1;
+                continue;
+            }
             let dest_file = dest.join(entry.file_name());
             fs::copy(&path, &dest_file)?;
             count += 1;
         }
+    }
+    if skipped > 0 {
+        println!("  Skipped {skipped} invalid spec(s)");
     }
     println!("  Installed {count} completion specs to {}", dest.display());
     Ok(())
@@ -109,10 +164,30 @@ fn install_to(zshrc_path: &Path, config_dir: &Path) -> Result<()> {
     let script_path = shell_dir.join("ghost-complete.zsh");
     fs::write(&script_path, ZSH_INTEGRATION)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
-    println!("  Wrote shell integration to {}", script_path.display());
+    println!("  Wrote zsh integration to {}", script_path.display());
+
+    let bash_path = shell_dir.join("ghost-complete.bash");
+    fs::write(&bash_path, BASH_INTEGRATION)
+        .with_context(|| format!("failed to write {}", bash_path.display()))?;
+    println!("  Wrote bash integration to {}", bash_path.display());
+
+    let fish_path = shell_dir.join("ghost-complete.fish");
+    fs::write(&fish_path, FISH_INTEGRATION)
+        .with_context(|| format!("failed to write {}", fish_path.display()))?;
+    println!("  Wrote fish integration to {}", fish_path.display());
 
     // 1b. Copy completion specs
     copy_specs(config_dir)?;
+
+    // 1c. Write default config.toml if one doesn't exist (never clobber)
+    let config_path = config_dir.join("config.toml");
+    if !config_path.exists() {
+        fs::write(&config_path, DEFAULT_CONFIG_TOML)
+            .with_context(|| format!("failed to write {}", config_path.display()))?;
+        println!("  Wrote default config to {}", config_path.display());
+    } else {
+        println!("  Config already exists at {}", config_path.display());
+    }
 
     // 2. Read existing .zshrc (or empty)
     let existing = if zshrc_path.exists() {
@@ -153,6 +228,15 @@ fn install_to(zshrc_path: &Path, config_dir: &Path) -> Result<()> {
 
     println!("\nghost-complete installed successfully!");
     println!("Restart your shell or run: source ~/.zshrc");
+    println!();
+    println!(
+        "For bash: Add to .bashrc:    source {}",
+        bash_path.display()
+    );
+    println!(
+        "For fish: Add to config.fish: source {}",
+        fish_path.display()
+    );
     Ok(())
 }
 
@@ -179,12 +263,18 @@ fn uninstall_from(zshrc_path: &Path, config_dir: &Path) -> Result<()> {
         println!("  {} does not exist, nothing to do", zshrc_path.display());
     }
 
-    // 2. Remove shell integration script
-    let script_path = config_dir.join("shell/ghost-complete.zsh");
-    if script_path.exists() {
-        fs::remove_file(&script_path)
-            .with_context(|| format!("failed to remove {}", script_path.display()))?;
-        println!("  Removed {}", script_path.display());
+    // 2. Remove shell integration scripts
+    for name in &[
+        "ghost-complete.zsh",
+        "ghost-complete.bash",
+        "ghost-complete.fish",
+    ] {
+        let script_path = config_dir.join("shell").join(name);
+        if script_path.exists() {
+            fs::remove_file(&script_path)
+                .with_context(|| format!("failed to remove {}", script_path.display()))?;
+            println!("  Removed {}", script_path.display());
+        }
     }
 
     // 3. Clean up empty shell/ directory (best-effort)
@@ -200,9 +290,7 @@ fn uninstall_from(zshrc_path: &Path, config_dir: &Path) -> Result<()> {
 pub fn run_install() -> Result<()> {
     let home = dirs::home_dir().context("could not determine home directory")?;
     let zshrc = home.join(".zshrc");
-    let config_dir = dirs::config_dir()
-        .context("could not determine config directory")?
-        .join("ghost-complete");
+    let config_dir = gc_config::config_dir().context("could not determine home directory")?;
 
     println!("Installing ghost-complete...\n");
     install_to(&zshrc, &config_dir)
@@ -211,9 +299,7 @@ pub fn run_install() -> Result<()> {
 pub fn run_uninstall() -> Result<()> {
     let home = dirs::home_dir().context("could not determine home directory")?;
     let zshrc = home.join(".zshrc");
-    let config_dir = dirs::config_dir()
-        .context("could not determine config directory")?
-        .join("ghost-complete");
+    let config_dir = gc_config::config_dir().context("could not determine home directory")?;
 
     println!("Uninstalling ghost-complete...\n");
     uninstall_from(&zshrc, &config_dir)
@@ -278,11 +364,21 @@ mod tests {
         assert!(content.contains(SHELL_END));
         assert!(content.contains("GHOST_COMPLETE_ACTIVE"));
 
-        // Shell script should be written
+        // Shell scripts should be written
         let script = config.join("shell/ghost-complete.zsh");
         assert!(script.exists());
         let script_content = fs::read_to_string(&script).unwrap();
         assert_eq!(script_content, ZSH_INTEGRATION);
+
+        let bash_script = config.join("shell/ghost-complete.bash");
+        assert!(bash_script.exists());
+        let bash_content = fs::read_to_string(&bash_script).unwrap();
+        assert_eq!(bash_content, BASH_INTEGRATION);
+
+        let fish_script = config.join("shell/ghost-complete.fish");
+        assert!(fish_script.exists());
+        let fish_content = fs::read_to_string(&fish_script).unwrap();
+        assert_eq!(fish_content, FISH_INTEGRATION);
 
         // Source path in .zshrc must match actual script location
         let expected_source = format!("source \"{}\"", script.display());
@@ -370,8 +466,10 @@ mod tests {
         assert!(!content.contains(SHELL_BEGIN));
         assert!(content.contains("export FOO=bar"));
 
-        // Script should be removed
+        // Scripts should be removed
         assert!(!config.join("shell/ghost-complete.zsh").exists());
+        assert!(!config.join("shell/ghost-complete.bash").exists());
+        assert!(!config.join("shell/ghost-complete.fish").exists());
     }
 
     #[test]
@@ -389,5 +487,103 @@ mod tests {
         let backup = zshrc.with_extension("backup.ghost-complete");
         let backup_content = fs::read_to_string(&backup).unwrap();
         assert_eq!(backup_content, existing);
+    }
+
+    #[test]
+    fn test_install_creates_default_config() {
+        let dir = TempDir::new().unwrap();
+        let zshrc = dir.path().join(".zshrc");
+        let config = dir.path().join("config");
+
+        install_to(&zshrc, &config).unwrap();
+
+        let config_path = config.join("config.toml");
+        assert!(config_path.exists());
+        let content = fs::read_to_string(&config_path).unwrap();
+        assert!(content.contains("[keybindings]"));
+        assert!(content.contains("[trigger]"));
+        assert!(content.contains("[popup]"));
+        assert!(content.contains("[theme]"));
+        // Should parse as valid TOML config with theme defaults active
+        let parsed: gc_config::GhostConfig = toml::from_str(&content).unwrap();
+        assert_eq!(parsed.keybindings.accept, "tab");
+        assert_eq!(parsed.theme.selected, "reverse");
+        assert_eq!(parsed.theme.description, "dim");
+    }
+
+    #[test]
+    fn test_install_does_not_clobber_existing_config() {
+        let dir = TempDir::new().unwrap();
+        let zshrc = dir.path().join(".zshrc");
+        let config = dir.path().join("config");
+
+        fs::create_dir_all(&config).unwrap();
+        let config_path = config.join("config.toml");
+        let custom = "[keybindings]\naccept = \"enter\"\n";
+        fs::write(&config_path, custom).unwrap();
+
+        install_to(&zshrc, &config).unwrap();
+
+        let content = fs::read_to_string(&config_path).unwrap();
+        assert_eq!(content, custom);
+    }
+
+    #[test]
+    fn test_copy_specs_skips_invalid_json() {
+        let source_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().unwrap();
+
+        // Valid spec
+        fs::write(
+            source_dir.path().join("good.json"),
+            r#"{"name": "good", "args": []}"#,
+        )
+        .unwrap();
+
+        // Invalid JSON
+        fs::write(
+            source_dir.path().join("bad.json"),
+            "{ this is not json at all",
+        )
+        .unwrap();
+
+        // Non-JSON file should be ignored entirely
+        fs::write(source_dir.path().join("readme.txt"), "ignore me").unwrap();
+
+        copy_specs_from(source_dir.path(), config_dir.path()).unwrap();
+
+        let dest = config_dir.path().join("specs");
+        assert!(dest.join("good.json").exists());
+        assert!(!dest.join("bad.json").exists());
+        assert!(!dest.join("readme.txt").exists());
+    }
+
+    #[test]
+    fn test_copy_specs_skips_valid_json_invalid_schema() {
+        let source_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().unwrap();
+
+        // Valid spec
+        fs::write(
+            source_dir.path().join("good.json"),
+            r#"{"name": "good", "args": []}"#,
+        )
+        .unwrap();
+
+        // Valid JSON but does NOT match CompletionSpec schema (missing required "name")
+        fs::write(
+            source_dir.path().join("bad_schema.json"),
+            r#"{"not_a_spec": true}"#,
+        )
+        .unwrap();
+
+        copy_specs_from(source_dir.path(), config_dir.path()).unwrap();
+
+        let dest = config_dir.path().join("specs");
+        assert!(dest.join("good.json").exists());
+        assert!(
+            !dest.join("bad_schema.json").exists(),
+            "valid JSON with invalid schema should be rejected at install time"
+        );
     }
 }

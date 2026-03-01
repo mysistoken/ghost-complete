@@ -8,11 +8,68 @@ use gc_overlay::types::{
     OverlayState, PopupLayout, DEFAULT_MAX_POPUP_WIDTH, DEFAULT_MAX_VISIBLE,
     DEFAULT_MIN_POPUP_WIDTH,
 };
-use gc_overlay::{clear_popup, render_popup};
+use gc_overlay::{clear_popup, render_popup, PopupTheme};
 use gc_parser::TerminalParser;
 use gc_suggest::{Suggestion, SuggestionEngine};
 
 use crate::input::KeyEvent;
+
+/// Resolved keybindings — each action maps to a concrete `KeyEvent`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Keybindings {
+    pub accept: KeyEvent,
+    pub accept_and_enter: KeyEvent,
+    pub dismiss: KeyEvent,
+    pub navigate_up: KeyEvent,
+    pub navigate_down: KeyEvent,
+    pub trigger: KeyEvent,
+}
+
+impl Default for Keybindings {
+    fn default() -> Self {
+        Self {
+            accept: KeyEvent::Tab,
+            accept_and_enter: KeyEvent::Enter,
+            dismiss: KeyEvent::Escape,
+            navigate_up: KeyEvent::ArrowUp,
+            navigate_down: KeyEvent::ArrowDown,
+            trigger: KeyEvent::CtrlSpace,
+        }
+    }
+}
+
+impl Keybindings {
+    pub fn from_config(config: &gc_config::KeybindingsConfig) -> anyhow::Result<Self> {
+        Ok(Self {
+            accept: parse_key_name(&config.accept)?,
+            accept_and_enter: parse_key_name(&config.accept_and_enter)?,
+            dismiss: parse_key_name(&config.dismiss)?,
+            navigate_up: parse_key_name(&config.navigate_up)?,
+            navigate_down: parse_key_name(&config.navigate_down)?,
+            trigger: parse_key_name(&config.trigger)?,
+        })
+    }
+}
+
+/// Parse a human-readable key name into a `KeyEvent`.
+///
+/// Supported names (case-insensitive):
+/// `tab`, `enter`, `escape`, `backspace`, `ctrl+space`,
+/// `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right`
+pub fn parse_key_name(name: &str) -> anyhow::Result<KeyEvent> {
+    match name.trim().to_lowercase().as_str() {
+        "tab" => Ok(KeyEvent::Tab),
+        "enter" => Ok(KeyEvent::Enter),
+        "escape" => Ok(KeyEvent::Escape),
+        "backspace" => Ok(KeyEvent::Backspace),
+        "ctrl+space" => Ok(KeyEvent::CtrlSpace),
+        "arrow_up" => Ok(KeyEvent::ArrowUp),
+        "arrow_down" => Ok(KeyEvent::ArrowDown),
+        "arrow_left" => Ok(KeyEvent::ArrowLeft),
+        "arrow_right" => Ok(KeyEvent::ArrowRight),
+        other => anyhow::bail!("unknown key name: {:?}", other),
+    }
+}
 
 pub struct InputHandler {
     engine: SuggestionEngine,
@@ -25,6 +82,8 @@ pub struct InputHandler {
     min_width: u16,
     max_width: u16,
     trigger_chars: HashSet<char>,
+    keybindings: Keybindings,
+    theme: PopupTheme,
 }
 
 impl InputHandler {
@@ -40,6 +99,8 @@ impl InputHandler {
             min_width: DEFAULT_MIN_POPUP_WIDTH,
             max_width: DEFAULT_MAX_POPUP_WIDTH,
             trigger_chars: DEFAULT_TRIGGER_CHARS.iter().copied().collect(),
+            keybindings: Keybindings::default(),
+            theme: PopupTheme::default(),
         })
     }
 
@@ -52,6 +113,16 @@ impl InputHandler {
 
     pub fn with_trigger_chars(mut self, chars: &[char]) -> Self {
         self.trigger_chars = chars.iter().copied().collect();
+        self
+    }
+
+    pub fn with_keybindings(mut self, keybindings: Keybindings) -> Self {
+        self.keybindings = keybindings;
+        self
+    }
+
+    pub fn with_theme(mut self, theme: PopupTheme) -> Self {
+        self.theme = theme;
         self
     }
 
@@ -111,88 +182,34 @@ impl InputHandler {
         parser: &Arc<Mutex<TerminalParser>>,
         stdout: &mut dyn Write,
     ) -> Vec<u8> {
+        // Configurable actions checked first via if-chain
+        if key == &self.keybindings.navigate_up {
+            self.overlay.move_up();
+            self.render(parser, stdout);
+            return Vec::new();
+        }
+        if key == &self.keybindings.navigate_down {
+            self.overlay
+                .move_down(self.suggestions.len(), self.max_visible);
+            self.render(parser, stdout);
+            return Vec::new();
+        }
+        if key == &self.keybindings.accept {
+            return self.accept_with_chaining(parser, stdout);
+        }
+        if key == &self.keybindings.accept_and_enter {
+            let mut forward = self.accept_suggestion(parser);
+            self.dismiss(stdout);
+            forward.push(0x0D);
+            return forward;
+        }
+        if key == &self.keybindings.dismiss {
+            self.dismiss(stdout);
+            return Vec::new();
+        }
+
+        // Structural keys — not configurable
         match key {
-            KeyEvent::ArrowUp => {
-                self.overlay.move_up();
-                self.render(parser, stdout);
-                Vec::new()
-            }
-            KeyEvent::ArrowDown => {
-                self.overlay
-                    .move_down(self.suggestions.len(), self.max_visible);
-                self.render(parser, stdout);
-                Vec::new()
-            }
-            KeyEvent::Tab => {
-                if self.suggestions.is_empty() {
-                    self.dismiss(stdout);
-                    return Vec::new();
-                }
-
-                let selected_text = self.suggestions[self.overlay.selected].text.clone();
-                let is_dir = selected_text.ends_with('/');
-                let forward = self.accept_suggestion(parser);
-
-                if is_dir {
-                    // CD chaining: predict the buffer after acceptance and
-                    // immediately show next-level suggestions. Avoids timing
-                    // issues with the shell's OSC 7770 roundtrip.
-                    let (cwd, predicted_ctx, cr, cc, sr, sc) = {
-                        let mut p = parser.lock().unwrap();
-                        let state = p.state();
-                        let buffer = state.command_buffer().unwrap_or("").to_string();
-                        let cursor = state.buffer_cursor();
-                        let old_ctx = parse_command_context(&buffer, cursor);
-                        let word_start = cursor - old_ctx.current_word.len();
-
-                        let mut predicted =
-                            String::with_capacity(buffer.len() + selected_text.len());
-                        predicted.push_str(&buffer[..word_start]);
-                        predicted.push_str(&selected_text);
-                        if cursor < buffer.len() {
-                            predicted.push_str(&buffer[cursor..]);
-                        }
-                        let new_cursor = word_start + selected_text.len();
-
-                        let cwd = state.cwd().cloned().unwrap_or_else(|| PathBuf::from("."));
-                        let ctx = parse_command_context(&predicted, new_cursor);
-                        let (cr, cc) = state.cursor_position();
-                        let (sr, sc) = state.screen_dimensions();
-
-                        // Update parser with predicted buffer so subsequent
-                        // Tab/Enter computes correct current_word
-                        p.state_mut().predict_command_buffer(predicted, new_cursor);
-
-                        (cwd, ctx, cr, cc, sr, sc)
-                    };
-
-                    match self.engine.suggest_sync(&predicted_ctx, &cwd) {
-                        Ok(suggestions) if !suggestions.is_empty() => {
-                            self.suggestions = suggestions;
-                            self.overlay.reset();
-                            self.visible = true;
-                            self.render_at(stdout, cr, cc, sr, sc);
-                        }
-                        _ => {
-                            self.dismiss(stdout);
-                        }
-                    }
-                } else {
-                    self.dismiss(stdout);
-                }
-
-                forward
-            }
-            KeyEvent::Enter => {
-                let mut forward = self.accept_suggestion(parser);
-                self.dismiss(stdout);
-                forward.push(0x0D);
-                forward
-            }
-            KeyEvent::Escape => {
-                self.dismiss(stdout);
-                Vec::new()
-            }
             KeyEvent::ArrowLeft | KeyEvent::ArrowRight => {
                 self.dismiss(stdout);
                 key_to_bytes(key)
@@ -210,18 +227,83 @@ impl InputHandler {
         }
     }
 
+    /// Accept the current suggestion, with directory chaining for paths ending in '/'.
+    fn accept_with_chaining(
+        &mut self,
+        parser: &Arc<Mutex<TerminalParser>>,
+        stdout: &mut dyn Write,
+    ) -> Vec<u8> {
+        if self.suggestions.is_empty() {
+            self.dismiss(stdout);
+            return Vec::new();
+        }
+
+        let selected_text = self.suggestions[self.overlay.selected].text.clone();
+        let is_dir = selected_text.ends_with('/');
+        let forward = self.accept_suggestion(parser);
+
+        if is_dir {
+            // CD chaining: predict the buffer after acceptance and
+            // immediately show next-level suggestions. Avoids timing
+            // issues with the shell's OSC 7770 roundtrip.
+            let (cwd, predicted_ctx, cr, cc, sr, sc) = {
+                let mut p = parser.lock().unwrap();
+                let state = p.state();
+                let buffer = state.command_buffer().unwrap_or("").to_string();
+                let cursor = state.buffer_cursor();
+                let old_ctx = parse_command_context(&buffer, cursor);
+                let word_start = cursor - old_ctx.current_word.len();
+
+                let mut predicted = String::with_capacity(buffer.len() + selected_text.len());
+                predicted.push_str(&buffer[..word_start]);
+                predicted.push_str(&selected_text);
+                if cursor < buffer.len() {
+                    predicted.push_str(&buffer[cursor..]);
+                }
+                let new_cursor = word_start + selected_text.len();
+
+                let cwd = state.cwd().cloned().unwrap_or_else(|| PathBuf::from("."));
+                let ctx = parse_command_context(&predicted, new_cursor);
+                let (cr, cc) = state.cursor_position();
+                let (sr, sc) = state.screen_dimensions();
+
+                // Update parser with predicted buffer so subsequent
+                // accept computes correct current_word
+                p.state_mut().predict_command_buffer(predicted, new_cursor);
+
+                (cwd, ctx, cr, cc, sr, sc)
+            };
+
+            match self.engine.suggest_sync(&predicted_ctx, &cwd) {
+                Ok(suggestions) if !suggestions.is_empty() => {
+                    self.suggestions = suggestions;
+                    self.overlay.reset();
+                    self.visible = true;
+                    self.render_at(stdout, cr, cc, sr, sc);
+                }
+                _ => {
+                    self.dismiss(stdout);
+                }
+            }
+        } else {
+            self.dismiss(stdout);
+        }
+
+        forward
+    }
+
     fn process_key_hidden(
         &mut self,
         key: &KeyEvent,
         parser: &Arc<Mutex<TerminalParser>>,
         stdout: &mut dyn Write,
     ) -> Vec<u8> {
+        if key == &self.keybindings.trigger {
+            // Manual trigger — fire immediately (no PTY roundtrip needed)
+            self.trigger(parser, stdout);
+            return Vec::new();
+        }
         match key {
-            KeyEvent::CtrlSpace => {
-                // Manual trigger — fire immediately (no PTY roundtrip needed)
-                self.trigger(parser, stdout);
-                Vec::new()
-            }
             KeyEvent::Printable(c) => {
                 let forward = vec![*c as u8];
                 if self.trigger_chars.contains(c) {
@@ -315,6 +397,7 @@ impl InputHandler {
             self.max_visible,
             self.min_width,
             self.max_width,
+            &self.theme,
         );
         let _ = stdout.write_all(&render_buf);
         let _ = stdout.flush();
@@ -387,6 +470,7 @@ pub fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
         KeyEvent::CtrlSpace => vec![0x00],
         KeyEvent::Backspace => vec![0x7F],
         KeyEvent::Printable(c) => vec![*c as u8],
+        KeyEvent::CursorPositionReport(_, _) => Vec::new(), // intercepted in proxy
         KeyEvent::Raw(bytes) => bytes.clone(),
     }
 }
@@ -492,6 +576,8 @@ mod tests {
             min_width: DEFAULT_MIN_POPUP_WIDTH,
             max_width: DEFAULT_MAX_POPUP_WIDTH,
             trigger_chars: DEFAULT_TRIGGER_CHARS.iter().copied().collect(),
+            keybindings: Keybindings::default(),
+            theme: PopupTheme::default(),
         };
 
         let mut stdout_buf = Vec::new();
@@ -515,6 +601,8 @@ mod tests {
             min_width: DEFAULT_MIN_POPUP_WIDTH,
             max_width: DEFAULT_MAX_POPUP_WIDTH,
             trigger_chars: DEFAULT_TRIGGER_CHARS.iter().copied().collect(),
+            keybindings: Keybindings::default(),
+            theme: PopupTheme::default(),
         }
     }
 
@@ -578,6 +666,8 @@ mod tests {
             min_width: DEFAULT_MIN_POPUP_WIDTH,
             max_width: DEFAULT_MAX_POPUP_WIDTH,
             trigger_chars: DEFAULT_TRIGGER_CHARS.iter().copied().collect(),
+            keybindings: Keybindings::default(),
+            theme: PopupTheme::default(),
         };
 
         // Simulate buffer "cd " with cursor at 3
@@ -628,6 +718,8 @@ mod tests {
             min_width: DEFAULT_MIN_POPUP_WIDTH,
             max_width: DEFAULT_MAX_POPUP_WIDTH,
             trigger_chars: DEFAULT_TRIGGER_CHARS.iter().copied().collect(),
+            keybindings: Keybindings::default(),
+            theme: PopupTheme::default(),
         };
 
         let parser = Arc::new(Mutex::new(gc_parser::TerminalParser::new(24, 80)));
@@ -653,5 +745,102 @@ mod tests {
         // Space should NOT trigger with custom config (not in set)
         handler.process_key(&KeyEvent::Printable(' '), &parser, &mut buf);
         assert!(!handler.has_pending_trigger());
+    }
+
+    // --- parse_key_name tests ---
+
+    #[test]
+    fn test_parse_key_name_all_supported() {
+        assert_eq!(parse_key_name("tab").unwrap(), KeyEvent::Tab);
+        assert_eq!(parse_key_name("enter").unwrap(), KeyEvent::Enter);
+        assert_eq!(parse_key_name("escape").unwrap(), KeyEvent::Escape);
+        assert_eq!(parse_key_name("backspace").unwrap(), KeyEvent::Backspace);
+        assert_eq!(parse_key_name("ctrl+space").unwrap(), KeyEvent::CtrlSpace);
+        assert_eq!(parse_key_name("arrow_up").unwrap(), KeyEvent::ArrowUp);
+        assert_eq!(parse_key_name("arrow_down").unwrap(), KeyEvent::ArrowDown);
+        assert_eq!(parse_key_name("arrow_left").unwrap(), KeyEvent::ArrowLeft);
+        assert_eq!(parse_key_name("arrow_right").unwrap(), KeyEvent::ArrowRight);
+    }
+
+    #[test]
+    fn test_parse_key_name_case_insensitive() {
+        assert_eq!(parse_key_name("Tab").unwrap(), KeyEvent::Tab);
+        assert_eq!(parse_key_name("TAB").unwrap(), KeyEvent::Tab);
+        assert_eq!(parse_key_name("CTRL+SPACE").unwrap(), KeyEvent::CtrlSpace);
+        assert_eq!(parse_key_name("Arrow_Up").unwrap(), KeyEvent::ArrowUp);
+        assert_eq!(parse_key_name("ESCAPE").unwrap(), KeyEvent::Escape);
+    }
+
+    #[test]
+    fn test_parse_key_name_trims_whitespace() {
+        assert_eq!(parse_key_name("  tab  ").unwrap(), KeyEvent::Tab);
+        assert_eq!(parse_key_name(" ctrl+space ").unwrap(), KeyEvent::CtrlSpace);
+    }
+
+    #[test]
+    fn test_parse_key_name_unknown_errors() {
+        assert!(parse_key_name("f1").is_err());
+        assert!(parse_key_name("ctrl+c").is_err());
+        assert!(parse_key_name("").is_err());
+        assert!(parse_key_name("banana").is_err());
+    }
+
+    // --- Keybindings tests ---
+
+    #[test]
+    fn test_keybindings_from_default_config() {
+        let config = gc_config::KeybindingsConfig::default();
+        let kb = Keybindings::from_config(&config).unwrap();
+        assert_eq!(kb, Keybindings::default());
+    }
+
+    #[test]
+    fn test_keybindings_from_custom_config() {
+        let config = gc_config::KeybindingsConfig {
+            accept: "enter".to_string(),
+            accept_and_enter: "tab".to_string(),
+            dismiss: "backspace".to_string(),
+            navigate_up: "ctrl+space".to_string(),
+            navigate_down: "arrow_right".to_string(),
+            trigger: "tab".to_string(),
+        };
+        let kb = Keybindings::from_config(&config).unwrap();
+        assert_eq!(kb.accept, KeyEvent::Enter);
+        assert_eq!(kb.accept_and_enter, KeyEvent::Tab);
+        assert_eq!(kb.dismiss, KeyEvent::Backspace);
+        assert_eq!(kb.navigate_up, KeyEvent::CtrlSpace);
+        assert_eq!(kb.navigate_down, KeyEvent::ArrowRight);
+        assert_eq!(kb.trigger, KeyEvent::Tab);
+    }
+
+    #[test]
+    fn test_keybindings_from_config_invalid_key() {
+        let config = gc_config::KeybindingsConfig {
+            accept: "nonexistent".to_string(),
+            ..gc_config::KeybindingsConfig::default()
+        };
+        assert!(Keybindings::from_config(&config).is_err());
+    }
+
+    // --- Custom keybinding behavior test ---
+
+    #[test]
+    fn test_custom_keybinding_trigger() {
+        let kb = Keybindings {
+            trigger: KeyEvent::Tab, // Tab triggers instead of Ctrl+Space
+            ..Keybindings::default()
+        };
+        let mut handler = make_handler().with_keybindings(kb);
+        let parser = Arc::new(Mutex::new(gc_parser::TerminalParser::new(24, 80)));
+        let mut buf = Vec::new();
+
+        // Tab should now act as trigger when popup is hidden
+        handler.process_key(&KeyEvent::Tab, &parser, &mut buf);
+        // Tab triggers immediately (like CtrlSpace normally does)
+        assert!(!handler.has_pending_trigger());
+
+        // CtrlSpace should pass through as raw bytes since it's no longer trigger
+        let result = handler.process_key(&KeyEvent::CtrlSpace, &parser, &mut buf);
+        assert_eq!(result, vec![0x00]);
     }
 }

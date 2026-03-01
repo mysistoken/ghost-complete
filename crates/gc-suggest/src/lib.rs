@@ -9,5 +9,5 @@ pub mod specs;
 pub mod types;
 
 pub use engine::SuggestionEngine;
-pub use specs::{CompletionSpec, SpecStore};
+pub use specs::{CompletionSpec, SpecLoadResult, SpecStore};
 pub use types::{Suggestion, SuggestionKind, SuggestionSource};

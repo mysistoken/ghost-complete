@@ -15,6 +15,8 @@ pub enum KeyEvent {
     CtrlSpace,
     Backspace,
     Printable(char),
+    /// Cursor Position Report response (CSI row;col R) — 1-indexed.
+    CursorPositionReport(u16, u16),
     /// Unknown bytes — forward verbatim to PTY.
     Raw(Vec<u8>),
 }
@@ -68,14 +70,22 @@ pub fn parse_keys(buf: &[u8]) -> Vec<KeyEvent> {
                         _ => {
                             // Unknown CSI — find end and pass through as Raw
                             let start = i;
-                            i += 3;
-                            // CSI params: bytes in 0x30-0x3F, intermediates: 0x20-0x2F
-                            // Final byte: 0x40-0x7E
+                            i += 2; // skip ESC [
+                                    // CSI params: bytes in 0x30-0x3F, intermediates: 0x20-0x2F
+                                    // Final byte: 0x40-0x7E
                             while i < buf.len() && buf[i] < 0x40 {
                                 i += 1;
                             }
                             if i < buf.len() {
+                                let final_byte = buf[i];
                                 i += 1; // consume final byte
+                                        // Check for CPR response: CSI {row};{col} R
+                                if final_byte == b'R' {
+                                    if let Some((row, col)) = parse_cpr(&buf[start + 2..i - 1]) {
+                                        events.push(KeyEvent::CursorPositionReport(row, col));
+                                        continue;
+                                    }
+                                }
                             }
                             events.push(KeyEvent::Raw(buf[start..i].to_vec()));
                         }
@@ -131,6 +141,16 @@ pub fn parse_keys(buf: &[u8]) -> Vec<KeyEvent> {
     }
 
     events
+}
+
+/// Parse a CPR parameter slice like b"15;1" into (row, col).
+/// Returns None if the format doesn't match.
+fn parse_cpr(params: &[u8]) -> Option<(u16, u16)> {
+    let s = std::str::from_utf8(params).ok()?;
+    let (row_s, col_s) = s.split_once(';')?;
+    let row = row_s.parse::<u16>().ok()?;
+    let col = col_s.parse::<u16>().ok()?;
+    Some((row, col))
 }
 
 #[cfg(test)]
@@ -224,6 +244,33 @@ mod tests {
     fn test_empty_input() {
         let events = parse_keys(b"");
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_cpr_response_parsed() {
+        // CSI 15;1 R — cursor at row 15, col 1
+        let events = parse_keys(b"\x1b[15;1R");
+        assert_eq!(events, vec![KeyEvent::CursorPositionReport(15, 1)]);
+    }
+
+    #[test]
+    fn test_cpr_response_large_values() {
+        let events = parse_keys(b"\x1b[100;200R");
+        assert_eq!(events, vec![KeyEvent::CursorPositionReport(100, 200)]);
+    }
+
+    #[test]
+    fn test_cpr_mixed_with_typing() {
+        // User types 'a', then CPR arrives, then user types 'b'
+        let events = parse_keys(b"a\x1b[5;10Rb");
+        assert_eq!(
+            events,
+            vec![
+                KeyEvent::Printable('a'),
+                KeyEvent::CursorPositionReport(5, 10),
+                KeyEvent::Printable('b'),
+            ]
+        );
     }
 
     #[test]

@@ -27,8 +27,16 @@ pub struct SuggestionEngine {
 
 impl SuggestionEngine {
     pub fn new(spec_dir: &Path) -> Result<Self> {
+        let result = SpecStore::load_from_dir(spec_dir)?;
+        if !result.errors.is_empty() {
+            tracing::warn!(
+                "{} spec(s) failed to load (run `ghost-complete validate-specs` for details): {}",
+                result.errors.len(),
+                result.errors.join(", ")
+            );
+        }
         Ok(Self {
-            spec_store: SpecStore::load_from_dir(spec_dir)?,
+            spec_store: result.store,
             filesystem_provider: FilesystemProvider::new(),
             history_provider: HistoryProvider::load(DEFAULT_MAX_HISTORY_ENTRIES),
             commands_provider: CommandsProvider::from_path_env(),
@@ -127,9 +135,20 @@ impl SuggestionEngine {
                 if let Some(spec) = self.spec_store.get(command) {
                     let resolution = specs::resolve_spec(spec, ctx);
 
-                    // Add subcommands and options from the spec
-                    candidates.extend(resolution.subcommands);
-                    candidates.extend(resolution.options);
+                    // When the preceding flag takes an argument (templates or
+                    // generators are set from the option's args), show ONLY
+                    // those arg completions — not the full subcommand/option
+                    // list.  The user typed e.g. `curl -o ` and wants files,
+                    // not more flags.
+                    let in_option_arg = ctx.preceding_flag.is_some()
+                        && (resolution.wants_filepaths
+                            || resolution.wants_folders_only
+                            || !resolution.generators.is_empty());
+
+                    if !in_option_arg {
+                        candidates.extend(resolution.subcommands);
+                        candidates.extend(resolution.options);
+                    }
 
                     // Handle generators (e.g., git branches/tags/remotes)
                     if self.providers_git {
@@ -186,7 +205,7 @@ mod tests {
     }
 
     fn make_engine() -> SuggestionEngine {
-        let spec_store = SpecStore::load_from_dir(&spec_dir()).unwrap();
+        let spec_store = SpecStore::load_from_dir(&spec_dir()).unwrap().store;
         let history = HistoryProvider::from_entries(vec![
             "git push".into(),
             "cargo build".into(),
@@ -323,8 +342,112 @@ mod tests {
     }
 
     #[test]
+    fn test_option_arg_template_triggers_filesystem() {
+        // pip install -r <TAB> → should show files from the filesystem
+        let engine = make_engine();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("requirements.txt"), "").unwrap();
+        std::fs::write(tmp.path().join("setup.py"), "").unwrap();
+
+        let ctx = CommandContext {
+            command: Some("pip".into()),
+            args: vec!["install".into(), "-r".into()],
+            current_word: String::new(),
+            word_index: 3,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: Some("-r".into()),
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: QuoteState::None,
+        };
+        let results = engine.suggest_sync(&ctx, tmp.path()).unwrap();
+        assert!(
+            results.iter().any(|s| s.text == "requirements.txt"),
+            "pip install -r should show files: {results:?}"
+        );
+    }
+
+    #[test]
+    fn test_curl_dash_o_shows_files_from_real_spec() {
+        // Uses the ACTUAL curl.json spec from disk — not a synthetic one
+        let engine = make_engine();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("output.html"), "").unwrap();
+        std::fs::write(tmp.path().join("data.json"), "").unwrap();
+
+        // Simulate: curl -o <TAB>
+        let ctx = CommandContext {
+            command: Some("curl".into()),
+            args: vec!["-o".into()],
+            current_word: String::new(),
+            word_index: 2,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: Some("-o".into()),
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: QuoteState::None,
+        };
+        let results = engine.suggest_sync(&ctx, tmp.path()).unwrap();
+
+        let file_results: Vec<_> = results
+            .iter()
+            .filter(|s| s.source == crate::types::SuggestionSource::Filesystem)
+            .collect();
+
+        eprintln!(
+            "All results for curl -o: {:?}",
+            results
+                .iter()
+                .map(|s| (&s.text, &s.source, &s.kind))
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "File results: {:?}",
+            file_results.iter().map(|s| &s.text).collect::<Vec<_>>()
+        );
+
+        assert!(
+            !file_results.is_empty(),
+            "curl -o should show filesystem results, got: {results:?}"
+        );
+    }
+
+    #[test]
+    fn test_option_arg_folders_template_filters_files() {
+        // pip install -t <TAB> → should show only directories
+        let engine = make_engine();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("target_dir")).unwrap();
+        std::fs::write(tmp.path().join("not_a_dir.txt"), "").unwrap();
+
+        let ctx = CommandContext {
+            command: Some("pip".into()),
+            args: vec!["install".into(), "-t".into()],
+            current_word: String::new(),
+            word_index: 3,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: Some("-t".into()),
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: QuoteState::None,
+        };
+        let results = engine.suggest_sync(&ctx, tmp.path()).unwrap();
+        assert!(
+            results.iter().any(|s| s.text.contains("target_dir")),
+            "pip install -t should show directories: {results:?}"
+        );
+        assert!(
+            !results.iter().any(|s| s.text.contains("not_a_dir")),
+            "pip install -t should NOT show files: {results:?}"
+        );
+    }
+
+    #[test]
     fn test_disabled_commands_provider() {
-        let spec_store = SpecStore::load_from_dir(&spec_dir()).unwrap();
+        let spec_store = SpecStore::load_from_dir(&spec_dir()).unwrap().store;
         let history = HistoryProvider::from_entries(vec![]);
         let commands = CommandsProvider::from_list(vec!["git".into(), "ls".into()]);
         let engine = SuggestionEngine::with_providers(spec_store, history, commands)

@@ -5,11 +5,13 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use gc_parser::TerminalParser;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 use gc_config::GhostConfig;
 
-use crate::handler::InputHandler;
+use gc_overlay::{parse_style, PopupTheme};
+
+use crate::handler::{InputHandler, Keybindings};
 use crate::input::parse_keys;
 use crate::resize::{get_terminal_size, resize_pty};
 use crate::spawn::{spawn_shell, SpawnedShell};
@@ -55,6 +57,16 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
     // Resolve spec directories from config
     let spec_dirs = resolve_spec_dirs(&config.paths.spec_dirs);
 
+    // Resolve keybindings from config (fail fast on invalid key names)
+    let keybindings = Keybindings::from_config(&config.keybindings)?;
+
+    // Resolve theme from config (fail fast on invalid style strings)
+    let theme = PopupTheme {
+        selected_on: parse_style(&config.theme.selected).context("invalid theme.selected style")?,
+        description_on: parse_style(&config.theme.description)
+            .context("invalid theme.description style")?,
+    };
+
     // Initialize suggestion handler with config
     let handler = Arc::new(Mutex::new({
         let h = InputHandler::new(&spec_dirs[0]).unwrap_or_else(|e| {
@@ -64,22 +76,39 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
             );
             InputHandler::new(std::path::Path::new(".")).expect("fallback handler")
         });
-        h.with_popup_config(
-            config.popup.max_visible,
-            config.popup.min_width,
-            config.popup.max_width,
-        )
-        .with_trigger_chars(&config.trigger.auto_chars)
-        .with_suggest_config(
-            config.suggest.max_results,
-            config.suggest.max_history_entries,
-            config.suggest.providers.commands,
-            config.suggest.providers.history,
-            config.suggest.providers.filesystem,
-            config.suggest.providers.specs,
-            config.suggest.providers.git,
-        )
+        h.with_keybindings(keybindings)
+            .with_theme(theme)
+            .with_popup_config(
+                config.popup.max_visible,
+                config.popup.min_width,
+                config.popup.max_width,
+            )
+            .with_trigger_chars(&config.trigger.auto_chars)
+            .with_suggest_config(
+                config.suggest.max_results,
+                config.suggest.max_history_entries,
+                config.suggest.providers.commands,
+                config.suggest.providers.history,
+                config.suggest.providers.filesystem,
+                config.suggest.providers.specs,
+                config.suggest.providers.git,
+            )
     }));
+
+    // Debounce task: fires suggestions after a typing pause
+    let debounce_notify = Arc::new(Notify::new());
+    let delay_ms = config.trigger.delay_ms;
+
+    let debounce_handle = if delay_ms > 0 {
+        let notify = Arc::clone(&debounce_notify);
+        let handler_d = Arc::clone(&handler);
+        let parser_d = Arc::clone(&parser);
+        Some(tokio::spawn(async move {
+            debounce_loop(notify, handler_d, parser_d, delay_ms).await;
+        }))
+    } else {
+        None
+    };
 
     // Channel to signal that one of the I/O tasks has finished
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -102,6 +131,16 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
 
             let keys = parse_keys(&buf[..n]);
             for key in &keys {
+                // Intercept CPR (Cursor Position Report) responses —
+                // update parser with real cursor position, don't forward
+                // to the shell PTY.
+                if let crate::input::KeyEvent::CursorPositionReport(row, col) = key {
+                    let mut p = parser_for_stdin.lock().unwrap();
+                    tracing::debug!(row, col, "CPR response — syncing cursor position");
+                    p.state_mut().set_cursor_from_report(*row, *col);
+                    continue;
+                }
+
                 // Handler writes popup rendering into a buffer instead of
                 // locking stdout for the entire loop (which would deadlock
                 // with Task B's stdout writes).
@@ -133,6 +172,7 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
     let pty_shutdown = shutdown_tx.clone();
     let parser_for_stdout = Arc::clone(&parser);
     let handler_for_stdout = Arc::clone(&handler);
+    let debounce_notify_b = Arc::clone(&debounce_notify);
     let stdout_handle = tokio::task::spawn_blocking(move || {
         let mut buf = [0u8; 8192];
         loop {
@@ -144,10 +184,11 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
             };
 
             // Feed bytes through the VT parser to track terminal state
-            {
+            let needs_cpr = {
                 let mut p = parser_for_stdout.lock().unwrap();
                 p.process_bytes(&buf[..n]);
-            }
+                p.state_mut().take_cursor_sync_requested()
+            };
 
             // Briefly lock stdout for each write — do NOT hold the lock
             // across the entire loop or it deadlocks with Task A.
@@ -155,6 +196,14 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
                 let mut stdout = std::io::stdout().lock();
                 if stdout.write_all(&buf[..n]).is_err() {
                     break;
+                }
+                // Send CPR request (CSI 6n) to the REAL terminal so it
+                // reports its actual cursor position. The response
+                // (CSI row;col R) arrives on stdin and is intercepted by
+                // Task A to sync our VT parser's cursor tracking.
+                if needs_cpr {
+                    tracing::debug!("sending CPR request (CSI 6n)");
+                    let _ = stdout.write_all(b"\x1b[6n");
                 }
                 if stdout.flush().is_err() {
                     break;
@@ -176,6 +225,8 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
                     if h.has_pending_trigger() {
                         h.clear_trigger_request();
                         h.trigger(&parser_for_stdout, &mut render_buf);
+                    } else if delay_ms > 0 {
+                        debounce_notify_b.notify_one();
                     }
                 }
                 if !render_buf.is_empty() {
@@ -251,6 +302,9 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
     // Clean up: abort I/O tasks (they'll be blocked on reads)
     stdin_handle.abort();
     stdout_handle.abort();
+    if let Some(h) = debounce_handle {
+        h.abort();
+    }
 
     // _raw_guard drops here, restoring terminal state
 
@@ -259,6 +313,41 @@ pub async fn run_proxy(shell: &str, args: &[String], config: &GhostConfig) -> Re
     let exit_code = status.exit_code().try_into().unwrap_or(1);
 
     Ok(exit_code)
+}
+
+/// Debounce loop: waits for buffer-change notifications, resets a timer on each
+/// new notification, and fires suggestions once the timer expires (typing pause).
+async fn debounce_loop(
+    notify: Arc<Notify>,
+    handler: Arc<Mutex<InputHandler>>,
+    parser: Arc<Mutex<TerminalParser>>,
+    delay_ms: u64,
+) {
+    let delay = std::time::Duration::from_millis(delay_ms);
+    loop {
+        // Wait for first buffer change notification
+        notify.notified().await;
+
+        // Debounce: reset timer on every new notification
+        loop {
+            tokio::select! {
+                _ = notify.notified() => { continue; }
+                _ = tokio::time::sleep(delay) => { break; }
+            }
+        }
+
+        // Timer expired — fire trigger
+        let mut render_buf = Vec::new();
+        {
+            let mut h = handler.lock().unwrap();
+            h.trigger(&parser, &mut render_buf);
+        }
+        if !render_buf.is_empty() {
+            let mut stdout = std::io::stdout().lock();
+            let _ = stdout.write_all(&render_buf);
+            let _ = stdout.flush();
+        }
+    }
 }
 
 /// Resolve spec directories from config, with tilde expansion.
@@ -276,8 +365,8 @@ fn resolve_spec_dirs(configured: &[String]) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
     // Config directory (installed by `ghost-complete install`)
-    if let Some(config_dir) = dirs::config_dir() {
-        let spec_dir = config_dir.join("ghost-complete/specs");
+    if let Some(config_dir) = gc_config::config_dir() {
+        let spec_dir = config_dir.join("specs");
         if spec_dir.is_dir() {
             dirs.push(spec_dir);
         }

@@ -1,10 +1,66 @@
 use std::io::Write;
 
+use anyhow::{bail, Result};
 use gc_suggest::{Suggestion, SuggestionKind};
 
 use crate::ansi;
 use crate::layout;
 use crate::types::{OverlayState, PopupLayout};
+
+/// Precomputed ANSI sequences for popup styling.
+/// Keeps gc-overlay independent of gc-config.
+pub struct PopupTheme {
+    pub selected_on: Vec<u8>,
+    pub description_on: Vec<u8>,
+}
+
+impl Default for PopupTheme {
+    fn default() -> Self {
+        Self {
+            selected_on: b"\x1b[7m".to_vec(),
+            description_on: b"\x1b[2m".to_vec(),
+        }
+    }
+}
+
+/// Parse a space-separated style string into a combined ANSI SGR sequence.
+///
+/// Supported tokens: `reverse`, `dim`, `bold`, `underline`, `fg:N`, `bg:N`
+/// (where N is a 256-color index).
+///
+/// Example: `"bold fg:196"` -> `b"\x1b[1;38;5;196m"`
+pub fn parse_style(style_str: &str) -> Result<Vec<u8>> {
+    let mut params: Vec<String> = Vec::new();
+
+    for token in style_str.split_whitespace() {
+        match token {
+            "reverse" => params.push("7".to_string()),
+            "dim" => params.push("2".to_string()),
+            "bold" => params.push("1".to_string()),
+            "underline" => params.push("4".to_string()),
+            _ if token.starts_with("fg:") => {
+                let n: u8 = token[3..]
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid fg color: {}", token))?;
+                params.push(format!("38;5;{n}"));
+            }
+            _ if token.starts_with("bg:") => {
+                let n: u8 = token[3..]
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("invalid bg color: {}", token))?;
+                params.push(format!("48;5;{n}"));
+            }
+            _ => bail!("unknown style token: {:?}", token),
+        }
+    }
+
+    if params.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let joined = params.join(";");
+    Ok(format!("\x1b[{joined}m").into_bytes())
+}
 
 /// Render a popup into a byte buffer. Returns the layout used for positioning
 /// (needed later for cleanup).
@@ -20,6 +76,7 @@ pub fn render_popup(
     max_visible: usize,
     min_width: u16,
     max_width: u16,
+    theme: &PopupTheme,
 ) -> PopupLayout {
     let layout = layout::compute_layout(
         suggestions,
@@ -50,10 +107,10 @@ pub fn render_popup(
         ansi::move_to(buf, row, layout.start_col);
 
         if is_selected {
-            ansi::reverse_video(buf);
+            buf.extend_from_slice(&theme.selected_on);
         }
 
-        format_item(buf, suggestion, layout.width, is_selected);
+        format_item(buf, suggestion, layout.width, is_selected, theme);
 
         ansi::reset(buf);
     }
@@ -85,7 +142,13 @@ pub fn clear_popup(buf: &mut Vec<u8>, layout: &PopupLayout) {
     ansi::end_sync(buf);
 }
 
-fn format_item(buf: &mut Vec<u8>, s: &Suggestion, width: u16, is_selected: bool) {
+fn format_item(
+    buf: &mut Vec<u8>,
+    s: &Suggestion,
+    width: u16,
+    is_selected: bool,
+    theme: &PopupTheme,
+) {
     let kind_char = match s.kind {
         SuggestionKind::Command => 'C',
         SuggestionKind::Subcommand => 'S',
@@ -116,7 +179,7 @@ fn format_item(buf: &mut Vec<u8>, s: &Suggestion, width: u16, is_selected: bool)
     if !desc.is_empty() && max_desc_len > 2 {
         let _ = buf.write_all(b"  ");
         if !is_selected {
-            ansi::dim(buf);
+            buf.extend_from_slice(&theme.description_on);
         }
         let truncated: String = desc.chars().take(max_desc_len).collect();
         let _ = write!(buf, "{truncated}");
@@ -182,6 +245,7 @@ mod tests {
             DEFAULT_MAX_VISIBLE,
             DEFAULT_MIN_POPUP_WIDTH,
             DEFAULT_MAX_POPUP_WIDTH,
+            &PopupTheme::default(),
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(
@@ -207,6 +271,7 @@ mod tests {
             DEFAULT_MAX_VISIBLE,
             DEFAULT_MIN_POPUP_WIDTH,
             DEFAULT_MAX_POPUP_WIDTH,
+            &PopupTheme::default(),
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(output.contains("\x1b7"), "should contain save cursor");
@@ -229,6 +294,7 @@ mod tests {
             DEFAULT_MAX_VISIBLE,
             DEFAULT_MIN_POPUP_WIDTH,
             DEFAULT_MAX_POPUP_WIDTH,
+            &PopupTheme::default(),
         );
         let output = String::from_utf8_lossy(&buf);
         // Popup below cursor at row 5 → starts at row 6 (1-indexed: 7)
@@ -254,6 +320,7 @@ mod tests {
             DEFAULT_MAX_VISIBLE,
             DEFAULT_MIN_POPUP_WIDTH,
             DEFAULT_MAX_POPUP_WIDTH,
+            &PopupTheme::default(),
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(
@@ -266,7 +333,7 @@ mod tests {
     fn test_format_item_shows_kind_gutter() {
         let mut buf = Vec::new();
         let s = make("checkout", None, SuggestionKind::Subcommand);
-        format_item(&mut buf, &s, 30, false);
+        format_item(&mut buf, &s, 30, false, &PopupTheme::default());
         let output = String::from_utf8_lossy(&buf);
         assert!(
             output.starts_with(" S checkout"),
@@ -279,7 +346,7 @@ mod tests {
         let mut buf = Vec::new();
         let long_desc = "a".repeat(200);
         let s = make("cmd", Some(&long_desc), SuggestionKind::Command);
-        format_item(&mut buf, &s, 30, false);
+        format_item(&mut buf, &s, 30, false, &PopupTheme::default());
         // Output should not exceed width
         assert!(buf.len() < 200, "should truncate description");
     }
@@ -341,6 +408,7 @@ mod tests {
             DEFAULT_MAX_VISIBLE,
             DEFAULT_MIN_POPUP_WIDTH,
             DEFAULT_MAX_POPUP_WIDTH,
+            &PopupTheme::default(),
         );
         let output = String::from_utf8_lossy(&buf);
         assert!(
@@ -370,11 +438,59 @@ mod tests {
             DEFAULT_MAX_VISIBLE,
             DEFAULT_MIN_POPUP_WIDTH,
             DEFAULT_MAX_POPUP_WIDTH,
+            &PopupTheme::default(),
         );
         assert_eq!(layout.height, 0);
         assert!(
             buf.is_empty(),
             "should produce no output for empty suggestions"
         );
+    }
+
+    // --- parse_style tests ---
+
+    #[test]
+    fn test_parse_style_reverse() {
+        assert_eq!(parse_style("reverse").unwrap(), b"\x1b[7m");
+    }
+
+    #[test]
+    fn test_parse_style_dim_bold() {
+        assert_eq!(parse_style("dim bold").unwrap(), b"\x1b[2;1m");
+    }
+
+    #[test]
+    fn test_parse_style_fg_color() {
+        assert_eq!(parse_style("fg:196").unwrap(), b"\x1b[38;5;196m");
+    }
+
+    #[test]
+    fn test_parse_style_bg_bold() {
+        assert_eq!(parse_style("bg:236 bold").unwrap(), b"\x1b[48;5;236;1m");
+    }
+
+    #[test]
+    fn test_parse_style_underline() {
+        assert_eq!(parse_style("underline").unwrap(), b"\x1b[4m");
+    }
+
+    #[test]
+    fn test_parse_style_empty() {
+        assert_eq!(parse_style("").unwrap(), b"");
+    }
+
+    #[test]
+    fn test_parse_style_invalid_token() {
+        assert!(parse_style("blink").is_err());
+    }
+
+    #[test]
+    fn test_parse_style_invalid_fg_number() {
+        assert!(parse_style("fg:abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_style_invalid_fg_overflow() {
+        assert!(parse_style("fg:999").is_err());
     }
 }

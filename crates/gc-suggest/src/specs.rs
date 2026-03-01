@@ -58,13 +58,22 @@ pub struct SpecStore {
     specs: HashMap<String, CompletionSpec>,
 }
 
+pub struct SpecLoadResult {
+    pub store: SpecStore,
+    pub errors: Vec<String>,
+}
+
 impl SpecStore {
-    pub fn load_from_dir(dir: &Path) -> Result<Self> {
+    pub fn load_from_dir(dir: &Path) -> Result<SpecLoadResult> {
         let mut specs = HashMap::new();
+        let mut errors = Vec::new();
 
         if !dir.exists() {
             tracing::debug!("spec directory does not exist: {}", dir.display());
-            return Ok(Self { specs });
+            return Ok(SpecLoadResult {
+                store: Self { specs },
+                errors,
+            });
         }
 
         let entries = std::fs::read_dir(dir)
@@ -76,18 +85,26 @@ impl SpecStore {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
+            let file_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             match Self::load_spec(&path) {
                 Ok(spec) => {
                     tracing::debug!("loaded spec: {}", spec.name);
                     specs.insert(spec.name.clone(), spec);
                 }
                 Err(e) => {
-                    tracing::warn!("failed to load spec {}: {e}", path.display());
+                    errors.push(format!("{file_name}: {e}"));
                 }
             }
         }
 
-        Ok(Self { specs })
+        Ok(SpecLoadResult {
+            store: Self { specs },
+            errors,
+        })
     }
 
     fn load_spec(path: &Path) -> Result<CompletionSpec> {
@@ -181,6 +198,25 @@ pub fn resolve_spec(spec: &CompletionSpec, ctx: &CommandContext) -> SpecResoluti
     let mut wants_filepaths = false;
     let mut wants_folders_only = false;
 
+    // If the preceding token was a flag that takes an argument, check
+    // the option's arg spec for templates/generators instead of the
+    // positional args.
+    if let Some(flag) = &ctx.preceding_flag {
+        if let Some(opt) = find_option(current_options, flag) {
+            if let Some(arg_spec) = &opt.args {
+                for gen in &arg_spec.generators {
+                    generators.push(gen.generator_type.clone());
+                }
+                match arg_spec.template.as_deref() {
+                    Some("filepaths") => wants_filepaths = true,
+                    Some("folders") => wants_folders_only = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Also check positional arg specs at the resolved position
     for arg_spec in current_args {
         for gen in &arg_spec.generators {
             generators.push(gen.generator_type.clone());
@@ -239,6 +275,40 @@ mod tests {
             }"#,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn test_curl_dash_o_resolve_spec_sets_wants_filepaths() {
+        let spec_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../specs/curl.json");
+        if !spec_path.exists() {
+            eprintln!("curl.json not found, skipping");
+            return;
+        }
+        let contents = std::fs::read_to_string(&spec_path).unwrap();
+        let spec: CompletionSpec = serde_json::from_str(&contents).unwrap();
+
+        // curl -o <TAB>
+        let ctx = CommandContext {
+            command: Some("curl".into()),
+            args: vec!["-o".into()],
+            current_word: String::new(),
+            word_index: 2,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: Some("-o".into()),
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: gc_buffer::QuoteState::None,
+        };
+        let res = resolve_spec(&spec, &ctx);
+        eprintln!(
+            "wants_filepaths={}, wants_folders_only={}, generators={:?}",
+            res.wants_filepaths, res.wants_folders_only, res.generators
+        );
+        assert!(
+            res.wants_filepaths,
+            "curl -o should set wants_filepaths from the -o option's args template"
+        );
     }
 
     #[test]
@@ -398,5 +468,208 @@ mod tests {
             !res.wants_folders_only,
             "filepaths template should NOT set wants_folders_only"
         );
+    }
+
+    #[test]
+    fn test_option_arg_filepaths_template_via_preceding_flag() {
+        // pip install -r <TAB> → should want filepaths
+        let spec: CompletionSpec = serde_json::from_str(
+            r#"{
+                "name": "pip",
+                "description": "Python package installer",
+                "subcommands": [{
+                    "name": "install",
+                    "description": "Install packages",
+                    "options": [{
+                        "name": ["-r", "--requirement"],
+                        "description": "Install from requirements file",
+                        "args": { "name": "file", "template": "filepaths" }
+                    }]
+                }]
+            }"#,
+        )
+        .unwrap();
+        let ctx = CommandContext {
+            command: Some("pip".into()),
+            args: vec!["install".into(), "-r".into()],
+            current_word: String::new(),
+            word_index: 3,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: Some("-r".into()),
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: gc_buffer::QuoteState::None,
+        };
+        let res = resolve_spec(&spec, &ctx);
+        assert!(
+            res.wants_filepaths,
+            "option with filepaths template should set wants_filepaths when preceding_flag matches"
+        );
+    }
+
+    #[test]
+    fn test_option_arg_folders_template_via_preceding_flag() {
+        // pip install -t <TAB> → should want folders only
+        let spec: CompletionSpec = serde_json::from_str(
+            r#"{
+                "name": "pip",
+                "description": "Python package installer",
+                "subcommands": [{
+                    "name": "install",
+                    "description": "Install packages",
+                    "options": [{
+                        "name": ["-t", "--target"],
+                        "description": "Install into this directory",
+                        "args": { "name": "dir", "template": "folders" }
+                    }]
+                }]
+            }"#,
+        )
+        .unwrap();
+        let ctx = CommandContext {
+            command: Some("pip".into()),
+            args: vec!["install".into(), "-t".into()],
+            current_word: String::new(),
+            word_index: 3,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: Some("-t".into()),
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: gc_buffer::QuoteState::None,
+        };
+        let res = resolve_spec(&spec, &ctx);
+        assert!(
+            res.wants_folders_only,
+            "option with folders template should set wants_folders_only when preceding_flag matches"
+        );
+        assert!(
+            !res.wants_filepaths,
+            "folders template should NOT set wants_filepaths"
+        );
+    }
+
+    #[test]
+    fn test_option_arg_generator_via_preceding_flag() {
+        // git checkout -b <TAB> with a generator on the option
+        let spec: CompletionSpec = serde_json::from_str(
+            r#"{
+                "name": "test-cmd",
+                "description": "Test",
+                "options": [{
+                    "name": ["-b", "--branch"],
+                    "description": "Branch name",
+                    "args": {
+                        "name": "branch",
+                        "generators": [{ "type": "git_branches" }]
+                    }
+                }]
+            }"#,
+        )
+        .unwrap();
+        let ctx = CommandContext {
+            command: Some("test-cmd".into()),
+            args: vec!["-b".into()],
+            current_word: String::new(),
+            word_index: 2,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: Some("-b".into()),
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: gc_buffer::QuoteState::None,
+        };
+        let res = resolve_spec(&spec, &ctx);
+        assert!(
+            res.generators.contains(&"git_branches".to_string()),
+            "option arg generators should be collected via preceding_flag"
+        );
+    }
+
+    #[test]
+    fn test_no_preceding_flag_no_option_template() {
+        // pip install <TAB> without a preceding flag — should NOT trigger option templates
+        let spec: CompletionSpec = serde_json::from_str(
+            r#"{
+                "name": "pip",
+                "description": "Python package installer",
+                "subcommands": [{
+                    "name": "install",
+                    "description": "Install packages",
+                    "options": [{
+                        "name": ["-r"],
+                        "description": "Requirements file",
+                        "args": { "name": "file", "template": "filepaths" }
+                    }]
+                }]
+            }"#,
+        )
+        .unwrap();
+        let ctx = CommandContext {
+            command: Some("pip".into()),
+            args: vec!["install".into()],
+            current_word: String::new(),
+            word_index: 2,
+            is_flag: false,
+            is_long_flag: false,
+            preceding_flag: None,
+            in_pipe: false,
+            in_redirect: false,
+            quote_state: gc_buffer::QuoteState::None,
+        };
+        let res = resolve_spec(&spec, &ctx);
+        assert!(
+            !res.wants_filepaths,
+            "should NOT want filepaths when no preceding_flag is set"
+        );
+    }
+
+    #[test]
+    fn test_load_from_dir_mixed_valid_and_invalid() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("good.json"),
+            r#"{"name": "good", "args": []}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("bad.json"), r#"{"not_a_spec": true}"#).unwrap();
+        std::fs::write(dir.path().join("broken.json"), "{ totally busted").unwrap();
+
+        let result = SpecStore::load_from_dir(dir.path()).unwrap();
+        assert!(
+            result.store.get("good").is_some(),
+            "valid spec should be loaded"
+        );
+        assert_eq!(result.errors.len(), 2, "should have 2 errors");
+        assert!(
+            result.errors.iter().any(|e| e.starts_with("bad.json:")),
+            "errors should include bad.json: {:?}",
+            result.errors
+        );
+        assert!(
+            result.errors.iter().any(|e| e.starts_with("broken.json:")),
+            "errors should include broken.json: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_load_from_dir_all_valid() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("alpha.json"), r#"{"name": "alpha"}"#).unwrap();
+        std::fs::write(dir.path().join("beta.json"), r#"{"name": "beta"}"#).unwrap();
+
+        let result = SpecStore::load_from_dir(dir.path()).unwrap();
+        assert!(result.errors.is_empty(), "no errors expected");
+        assert!(result.store.get("alpha").is_some());
+        assert!(result.store.get("beta").is_some());
+    }
+
+    #[test]
+    fn test_load_from_dir_nonexistent() {
+        let result = SpecStore::load_from_dir(Path::new("/nonexistent/path/specs")).unwrap();
+        assert!(result.errors.is_empty());
+        assert!(result.store.get("anything").is_none());
     }
 }

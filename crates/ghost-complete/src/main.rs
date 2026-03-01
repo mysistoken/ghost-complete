@@ -1,4 +1,5 @@
 mod install;
+mod validate;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -8,7 +9,7 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "ghost-complete",
     about = "Terminal-native autocomplete engine",
-    after_help = "COMMANDS:\n  install     Install shell integration into ~/.zshrc\n  uninstall   Remove shell integration from ~/.zshrc"
+    after_help = "COMMANDS:\n  install          Install shell integration (zsh/bash/fish)\n  uninstall        Remove shell integration\n  validate-specs   Validate completion spec files\n\nSHELL SUPPORT:\n  zsh   Full support (auto-installed into ~/.zshrc)\n  bash  Ctrl+Space trigger (source shell script from .bashrc)\n  fish  Ctrl+Space trigger (source shell script from config.fish)"
 )]
 struct Cli {
     /// Path to config file
@@ -28,6 +29,22 @@ struct Cli {
     shell_args: Vec<String>,
 }
 
+fn default_log_file() -> Option<String> {
+    let state_dir = dirs::state_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join(".local/state")))
+        .map(|d| d.join("ghost-complete"));
+    if let Some(dir) = state_dir {
+        let _ = std::fs::create_dir_all(&dir);
+        Some(
+            dir.join("ghost-complete.log")
+                .to_string_lossy()
+                .into_owned(),
+        )
+    } else {
+        None
+    }
+}
+
 fn init_tracing(level: &str, log_file: Option<&str>) -> Result<()> {
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("warn"));
 
@@ -44,9 +61,6 @@ fn init_tracing(level: &str, log_file: Option<&str>) -> Result<()> {
             .with_ansi(false)
             .init();
     } else {
-        // Write logs to stderr — but only if a log file isn't specified.
-        // In practice, for a PTY proxy you almost always want --log-file
-        // because stderr goes to the terminal and would corrupt output.
         tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_writer(std::io::stderr)
@@ -68,10 +82,16 @@ fn main() -> Result<()> {
             init_tracing(&cli.log_level, cli.log_file.as_deref())?;
             return install::run_uninstall();
         }
+        Some("validate-specs") => {
+            init_tracing(&cli.log_level, cli.log_file.as_deref())?;
+            return validate::run_validate_specs(cli.config.as_deref());
+        }
         _ => {}
     }
 
-    init_tracing(&cli.log_level, cli.log_file.as_deref())?;
+    // Proxy mode — default to log file, never stderr
+    let log_file = cli.log_file.or_else(default_log_file);
+    init_tracing(&cli.log_level, log_file.as_deref())?;
 
     let (shell, args) = if cli.shell_args.is_empty() {
         let default_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
