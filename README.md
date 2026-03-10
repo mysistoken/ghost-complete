@@ -76,7 +76,7 @@ ghost-complete install
 
 - Adds shell integration to `~/.zshrc` (auto-wraps your shell via PTY proxy)
 - Deploys shell scripts for bash/fish to `~/.config/ghost-complete/shell/`
-- Installs 18 completion specs to `~/.config/ghost-complete/specs/`
+- Installs 34 completion specs to `~/.config/ghost-complete/specs/`
 - Creates default config at `~/.config/ghost-complete/config.toml` (never overwrites existing)
 
 ### Uninstall
@@ -125,9 +125,9 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
 
 ## Completion Specs
 
-Ghost Complete ships with 18 Fig-compatible JSON completion specs:
+Ghost Complete ships with 34 Fig-compatible JSON completion specs:
 
-`brew` `cargo` `cd` `curl` `docker` `gh` `git` `grep` `jq` `kubectl` `make` `npm` `pip` `pip3` `python` `python3` `ssh` `tar`
+`brew` `cargo` `cd` `chmod` `curl` `docker` `find` `gh` `git` `gradle` `gradlew` `grep` `jq` `kill` `killall` `kubectl` `ln` `make` `man` `mvn` `node` `npm` `pip` `pip3` `python` `python3` `rsync` `rustup` `ssh` `tar` `tmux` `unzip` `wget` `zip`
 
 Custom specs go in `~/.config/ghost-complete/specs/`. See [docs/COMPLETION_SPEC.md](docs/COMPLETION_SPEC.md) for the format reference.
 
@@ -168,7 +168,7 @@ The PTY proxy sits between the terminal and the shell, rendering popups via pure
 
 **Why custom JSON specs instead of using the shell's built-in completions?**
 
-Specs are declarative and fast — microsecond loads, no shell execution. They use the same format [Fig](https://fig.io) used, so there's a large existing ecosystem to draw from. The tradeoff is coverage: Ghost Complete ships with 18 specs today. Commands without a spec fall back to filesystem completions. Adding new specs is straightforward — see [docs/COMPLETION_SPEC.md](docs/COMPLETION_SPEC.md), and contributions are welcome.
+Specs are declarative and fast — microsecond loads, no shell execution. They use the same format [Fig](https://fig.io) used, so there's a large existing ecosystem to draw from. The tradeoff is coverage: Ghost Complete ships with 34 specs today. Commands without a spec fall back to filesystem completions. Adding new specs is straightforward — see [docs/COMPLETION_SPEC.md](docs/COMPLETION_SPEC.md), and contributions are welcome.
 
 **Where's the config documentation? I'm having popup alignment issues.**
 
